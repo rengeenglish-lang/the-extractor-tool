@@ -1,7 +1,7 @@
 'use strict';
 
 // Link to MP3: a bridge. Nothing is written to disk on the server.
-// yt-dlp -> ffmpeg -> HTTP response -> the user's device.
+// yt-dlp finds the direct audio URL -> ffmpeg reads it and encodes MP3 -> HTTP response -> the user's device.
 
 const express = require('express');
 const session = require('express-session');
@@ -67,11 +67,16 @@ function sanitizeFilename(name) {
   return (clean || 'audio') + '.mp3';
 }
 
+function lastErrorLine(text, fallback) {
+  const lines = String(text || '').trim().split('\n').filter(Boolean);
+  return (lines[lines.length - 1] || fallback).replace(/^ERROR:\s*/, '');
+}
+
 function oauthClient() {
   return new google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, `${BASE_URL}/auth/google/callback`);
 }
 
-// Ask yt-dlp for the title only (no download). Runs in parallel with the download.
+// Ask yt-dlp for the title only (no download). Runs in parallel with the extraction.
 function getTitle(url) {
   return new Promise((resolve) => {
     const p = spawn(YTDLP, ['--no-playlist', '--no-warnings', '--skip-download', '--print', '%(title)s', url]);
@@ -82,6 +87,29 @@ function getTitle(url) {
     p.on('close', (code) => {
       clearTimeout(timer);
       resolve(code === 0 ? out.trim().split('\n')[0] || null : null);
+    });
+  });
+}
+
+// Ask yt-dlp for the direct URL of the best audio stream. ffmpeg reads that URL itself,
+// which avoids piping containers that cannot be streamed (such as m4a with its index at the end).
+function getDirectUrl(url) {
+  return new Promise((resolve) => {
+    const p = spawn(YTDLP, ['--no-playlist', '--no-warnings', '-f', 'bestaudio/best', '-g', url]);
+    let out = '';
+    let err = '';
+    const timer = setTimeout(() => p.kill('SIGKILL'), 60 * 1000);
+    p.stdout.on('data', (d) => { out += d; });
+    p.stderr.on('data', (d) => { err += d; });
+    p.on('error', (e) => {
+      clearTimeout(timer);
+      resolve({ ok: false, error: e.code === 'ENOENT' ? 'yt-dlp is not installed on the server.' : e.message });
+    });
+    p.on('close', (code) => {
+      clearTimeout(timer);
+      const line = out.trim().split('\n')[0];
+      if (code === 0 && line) resolve({ ok: true, url: line });
+      else resolve({ ok: false, error: lastErrorLine(err, 'No audio could be found at this link.') });
     });
   });
 }
@@ -117,7 +145,6 @@ app.get('/api/extract', async (req, res) => {
   let released = false;
   const finish = () => { if (!released) { released = true; release(); } };
 
-  let ytdlp = null;
   let ffmpeg = null;
   let drive = null;
   let errText = '';
@@ -130,7 +157,6 @@ app.get('/api/extract', async (req, res) => {
   const queue = [];         // audio chunks produced before the headers can be sent
 
   const killAll = () => {
-    if (ytdlp) ytdlp.kill('SIGKILL');
     if (ffmpeg) ffmpeg.kill('SIGKILL');
   };
 
@@ -174,33 +200,31 @@ app.get('/api/extract', async (req, res) => {
     if (!haveTitle) return;
     clearTimeout(timeout);
     if (!res.headersSent) {
-      const msg = (errText.trim().split('\n').pop() || 'No audio could be extracted from this link.').replace(/^ERROR:\s*/, '');
+      const msg = lastErrorLine(errText, 'No audio could be extracted from this link.');
       res.status(502).json({ error: msg });
     }
     finish();
   }
 
   try {
-    // Title lookup and download start together; the response waits only for the title and the first audio bytes.
-    getTitle(url).then((title) => {
-      titleName = sanitizeFilename(title || 'audio');
-      haveTitle = true;
-      tryStart();
-      finalize();   // covers the case where the download already finished without audio
-    });
+    const [direct, title] = await Promise.all([getDirectUrl(url), getTitle(url)]);
+    titleName = sanitizeFilename(title || 'audio');
+    haveTitle = true;
 
-    ytdlp = spawn(YTDLP, ['--no-playlist', '--no-warnings', '-f', 'bestaudio/best', '-o', '-', url]);
+    if (!direct.ok) {
+      clearTimeout(timeout);
+      if (!res.headersSent) res.status(502).json({ error: direct.error });
+      finish();
+      return;
+    }
+
     ffmpeg = spawn(FFMPEG, [
       '-hide_banner', '-loglevel', 'error',
-      '-i', 'pipe:0', '-vn',
+      '-i', direct.url, '-vn',
       '-codec:a', 'libmp3lame', '-q:a', '4',
       '-f', 'mp3', 'pipe:1'
     ]);
 
-    ytdlp.stdout.pipe(ffmpeg.stdin);
-    ytdlp.stdout.on('error', () => {});
-    ffmpeg.stdin.on('error', () => {});
-    ytdlp.stderr.on('data', (d) => { errText = (errText + d).slice(-2000); });
     ffmpeg.stderr.on('data', (d) => { errText = (errText + d).slice(-2000); });
 
     ffmpeg.stdout.on('data', (chunk) => {
@@ -213,18 +237,15 @@ app.get('/api/extract', async (req, res) => {
       writeChunk(chunk);
     });
 
-    ytdlp.on('close', (code) => {
-      if (code !== 0) errText = (errText + `\nERROR: yt-dlp exited with code ${code}`).slice(-2000);
-      if (ffmpeg) ffmpeg.stdin.end();
-    });
-
     ffmpeg.on('close', (code) => {
       clearTimeout(timeout);
       ffmpegDone = true;
       ffmpegCode = code;
-      if (code !== 0) console.error('Extraction failed:', errText.trim().split('\n').pop());
+      if (code !== 0) console.error('Extraction failed:', lastErrorLine(errText, `exit ${code}`));
       finalize();
     });
+
+    tryStart();
   } catch (err) {
     clearTimeout(timeout);
     killAll();
