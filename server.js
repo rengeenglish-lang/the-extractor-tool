@@ -25,7 +25,7 @@ const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toSt
 // ---------- App ----------
 const app = express();
 app.set('trust proxy', 1);
-app.use(express.json({ limit: '10kb' }));
+app.use(express.json({ limit: '32kb' }));
 app.use(session({
   name: 'ae.sid',
   secret: SESSION_SECRET,
@@ -409,6 +409,9 @@ app.get('/api/extract', async (req, res) => {
     if (!res.headersSent) res.status(500).json({ error: 'Server error while starting extraction.' });
   }
 });
+
+// ---------- Materials: find PDFs, books and videos on a page, save the chosen one ----------
+require('./materials').register(app, { acquire, release, oauthClient, YTDLP });
 
 // ---------- Google Drive connection ----------
 app.get('/api/me', (req, res) => {

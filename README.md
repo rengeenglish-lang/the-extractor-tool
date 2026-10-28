@@ -63,3 +63,14 @@ Open http://localhost:3000.
 - Large files are held in the browser's memory until the download completes, since the browser needs the whole file to save it.
 - Sessions use an in-memory store, so restarting the server disconnects Drive. Use a persistent session store before running it for more than one user.
 - You are responsible for what you process.
+
+## Find books and videos on a website
+
+The second panel on the page takes a web page URL and lists the PDFs, e-books (EPUB, MOBI), videos (MP4, WebM, MOV, MKV, HLS, YouTube/Vimeo embeds) and audio files it links to. Picking one saves it to the connected Google Drive, or sends it to the browser when Drive is not connected. Nothing is stored on the server.
+
+- `POST /api/materials/find` `{ url, cookie? }` returns `{ title, items }`.
+- `POST /api/materials/save` `{ url, name, via, pageUrl, cookie? }`. With Drive connected it answers with progress lines (`application/x-ndjson`), otherwise with the file.
+- Only public web addresses are allowed. Local and private addresses are refused (set `ALLOW_PRIVATE_HOSTS=1` for local testing only).
+- The optional cookie is for sites you are logged into. It is used for that request only, sent only to the pasted site and its subdomains, and never stored or logged.
+- `MAX_MATERIAL_MB` (default `1500`) and `MAX_MATERIAL_MS` (default 30 minutes) limit one transfer.
+- Only fetch content you have the right to download.

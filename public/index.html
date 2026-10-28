@@ -39,6 +39,17 @@
   .drive .state b { color: var(--ok); font-weight: 600; }
   .bar { height: 6px; margin: 14px 2px 0; background: var(--border); border-radius: 3px; overflow: hidden; }
   .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+  .section { margin-top: 18px; }
+  .section h2 { font-size: 18px; margin: 0 0 4px; }
+  .section .sub { margin-bottom: 14px; }
+  .cookie { margin-top: 12px; font-size: 13px; color: var(--muted); }
+  .cookie summary { cursor: pointer; }
+  .cookie textarea { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font: 12px/1.4 ui-monospace, Menlo, monospace; }
+  .items { list-style: none; margin: 14px 0 0; padding: 0; }
+  .items li { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--border); }
+  .items .tag { flex: none; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; padding: 2px 7px; border: 1px solid var(--border); border-radius: 6px; color: var(--muted); }
+  .items .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .items button { padding: 7px 12px; font-size: 13px; }
   .hidden { display: none !important; }
   footer { color: var(--muted); font-size: 12px; margin-top: 28px; }
 </style>
@@ -65,6 +76,23 @@
     </div>
   </div>
 
+  <div class="panel section">
+    <h2>Find books and videos on a website</h2>
+    <p class="sub">Paste a web page. The tool lists the PDFs, e-books, videos and audio files it links to. Pick one and it is saved to your Google Drive, or to your device if Drive is not connected.</p>
+    <form id="findForm" autocomplete="off">
+      <input type="url" id="siteUrl" placeholder="https://" required>
+      <button type="submit" class="primary" id="findBtn">Find files</button>
+    </form>
+    <details class="cookie">
+      <summary>Site needs a login? (advanced)</summary>
+      <p>Paste the <code>Cookie</code> request header from your browser while logged in (developer tools, Network tab). It is used for this request only, sent only to that site, and never stored or logged. Only use content you are allowed to download.</p>
+      <textarea id="cookie" rows="2" placeholder="name=value; name2=value2"></textarea>
+    </details>
+    <div class="status" id="findStatus"></div>
+    <div class="bar hidden" id="saveBar"><div id="saveBarFill"></div></div>
+    <ul class="items" id="items"></ul>
+  </div>
+
   <footer>Only process content you have the right to use.</footer>
 </div>
 
@@ -88,7 +116,11 @@
     } catch (_) {}
   }
 
+  let driveOn = false;
+
   function renderDrive(me) {
+    driveOn = !!me.drive;
+    document.querySelectorAll('.items .save').forEach((b) => { b.textContent = driveOn ? 'Save to Drive' : 'Download'; });
     const state = $('#driveState');
     const connect = $('#driveConnect');
     const disconnect = $('#driveDisconnect');
@@ -189,6 +221,170 @@
       btn.disabled = false;
     }
   });
+
+  // ---------- Find books and videos on a website ----------
+  const findStatus = $('#findStatus');
+  const saveBar = $('#saveBar');
+  const saveBarFill = $('#saveBarFill');
+  let pageUrl = '';
+  let busy = false;
+
+  function setFind(text, cls) {
+    findStatus.className = 'status' + (cls ? ' ' + cls : '');
+    findStatus.textContent = text;
+  }
+
+  const KIND = { pdf: 'PDF', book: 'Book', video: 'Video', audio: 'Audio' };
+
+  function renderItems(items) {
+    const list = $('#items');
+    list.textContent = '';
+    for (const it of items) {
+      const li = document.createElement('li');
+      const tag = document.createElement('span');
+      tag.className = 'tag';
+      tag.textContent = KIND[it.kind] || it.kind;
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = it.title;
+      name.title = it.url;
+      const btn = document.createElement('button');
+      btn.className = 'primary save';
+      btn.textContent = driveOn ? 'Save to Drive' : 'Download';
+      btn.addEventListener('click', () => saveItem(it, btn));
+      li.append(tag, name, btn);
+      list.append(li);
+    }
+  }
+
+  $('#findForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (busy) return;
+    const url = $('#siteUrl').value.trim();
+    if (!url) return;
+    busy = true;
+    $('#findBtn').disabled = true;
+    $('#items').textContent = '';
+    saveBar.classList.add('hidden');
+    setFind('Looking at the page…');
+    try {
+      const res = await fetch('/api/materials/find', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, cookie: $('#cookie').value.trim() })
+      });
+      const data = await res.json();
+      if (!res.ok) { setFind(data.error || 'Could not read that page.', 'err'); return; }
+      pageUrl = url;
+      renderItems(data.items);
+      setFind(`${data.items.length} file${data.items.length === 1 ? '' : 's'} found${data.title ? ' on “' + data.title + '”' : ''}.`, 'ok');
+    } catch (_) {
+      setFind('Could not reach the server.', 'err');
+    } finally {
+      busy = false;
+      $('#findBtn').disabled = false;
+    }
+  });
+
+  async function saveItem(it, btn) {
+    if (busy) return;
+    busy = true;
+    btn.disabled = true;
+    saveBar.classList.add('hidden');
+    saveBarFill.style.width = '0%';
+    const t0 = Date.now();
+    const secs = () => Math.round((Date.now() - t0) / 1000) + 's';
+    setFind('Starting…');
+    try {
+      const res = await fetch('/api/materials/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: it.url, name: it.title, via: it.via, pageUrl, cookie: $('#cookie').value.trim() })
+      });
+      const type = res.headers.get('Content-Type') || '';
+
+      if (!res.ok) {
+        let msg = 'Could not fetch that file.';
+        try { msg = (await res.json()).error || msg; } catch (_) {}
+        setFind(msg, 'err');
+        return;
+      }
+
+      if (type.includes('application/x-ndjson')) {
+        // Saved to Drive: the server reports progress as lines.
+        const reader = res.body.getReader();
+        const dec = new TextDecoder();
+        let buf = '';
+        let result = null;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          let nl;
+          while ((nl = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, nl).trim();
+            buf = buf.slice(nl + 1);
+            if (!line) continue;
+            const msg = JSON.parse(line);
+            if (msg.progress !== undefined) {
+              if (msg.total) {
+                saveBar.classList.remove('hidden');
+                saveBarFill.style.width = Math.min(99, Math.floor((msg.progress / msg.total) * 100)) + '%';
+                setFind(`Saving to Drive… ${Math.min(99, Math.floor((msg.progress / msg.total) * 100))}% (${fmtMB(msg.progress)}) · ${secs()}`);
+              } else {
+                setFind(`Saving to Drive… ${fmtMB(msg.progress)} · ${secs()}`);
+              }
+            } else if (msg.done || msg.error) {
+              result = msg;
+            }
+          }
+        }
+        if (!result) setFind('The connection ended before the file was saved.', 'err');
+        else if (result.error) setFind(result.error, 'err');
+        else {
+          saveBarFill.style.width = '100%';
+          setFind(`Saved to Drive: ${result.name} (${fmtMB(result.bytes)}) in ${secs()}`, 'ok');
+        }
+        return;
+      }
+
+      // No Drive connected: the file itself arrives, save it to the device.
+      const reader = res.body.getReader();
+      const chunks = [];
+      let received = 0;
+      const total = Number(res.headers.get('Content-Length')) || 0;
+      if (total) saveBar.classList.remove('hidden');
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        received += value.length;
+        if (total) {
+          const pct = Math.min(99, Math.floor((received / total) * 100));
+          saveBarFill.style.width = pct + '%';
+          setFind(`Downloading… ${pct}% (${fmtMB(received)}) · ${secs()}`);
+        } else {
+          setFind(`Downloading… ${fmtMB(received)} · ${secs()}`);
+        }
+      }
+      saveBarFill.style.width = '100%';
+      const name = filenameFrom(res.headers.get('Content-Disposition'));
+      const objectUrl = URL.createObjectURL(new Blob(chunks, { type }));
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 60 * 1000);
+      setFind(`Saved to your device: ${name} (${fmtMB(received)}) in ${secs()}`, 'ok');
+    } catch (_) {
+      setFind('Could not reach the server, or the download was interrupted.', 'err');
+    } finally {
+      busy = false;
+      btn.disabled = false;
+    }
+  }
 
   loadMe();
 })();
