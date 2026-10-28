@@ -35,7 +35,7 @@ app.use(session({
 }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Simple concurrency limit so one user cannot exhaust the host.
+// Concurrency limit so one user cannot exhaust the host.
 let active = 0;
 const waiting = [];
 function acquire() {
@@ -71,7 +71,7 @@ function oauthClient() {
   return new google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, `${BASE_URL}/auth/google/callback`);
 }
 
-// Ask yt-dlp for the title only (no download) so the browser gets a sensible file name.
+// Ask yt-dlp for the title only (no download). Runs in parallel with the download.
 function getTitle(url) {
   return new Promise((resolve) => {
     const p = spawn(YTDLP, ['--no-playlist', '--no-warnings', '--skip-download', '--print', '%(title)s', url]);
@@ -86,8 +86,7 @@ function getTitle(url) {
   });
 }
 
-// Optional Google Drive copy. Streams the same bytes to Drive as they go to the device.
-// Nothing is buffered on disk; the upload runs alongside the download.
+// Optional Google Drive copy. The same bytes stream to Drive during the download.
 function startDriveUpload(tokens, filename) {
   const pass = new PassThrough();
   pass.on('error', () => {});
@@ -121,31 +120,80 @@ app.get('/api/extract', async (req, res) => {
   let ytdlp = null;
   let ffmpeg = null;
   let drive = null;
-  let started = false;
   let errText = '';
+  let started = false;      // response headers sent, audio streaming
+  let haveTitle = false;
+  let titleName = null;
+  let ffmpegDone = false;
+  let ffmpegCode = null;
+  let sawAudio = false;
+  const queue = [];         // audio chunks produced before the headers can be sent
 
   const killAll = () => {
     if (ytdlp) ytdlp.kill('SIGKILL');
     if (ffmpeg) ffmpeg.kill('SIGKILL');
   };
 
-  // Client went away or the request ended: stop the work and free the slot.
   res.on('close', () => {
-    if (!res.writableFinished) killAll();
+    if (!res.writableEnded) killAll();
     finish();
   });
 
   const timeout = setTimeout(killAll, MAX_RUNTIME_MS);
 
+  function writeChunk(chunk) {
+    if (drive && !drive.destroyed) drive.write(chunk);
+    if (!res.write(chunk)) {
+      ffmpeg.stdout.pause();
+      res.once('drain', () => ffmpeg.stdout.resume());
+    }
+  }
+
+  function tryStart() {
+    if (started || !haveTitle || !sawAudio) return;
+    started = true;
+    res.writeHead(200, {
+      'Content-Type': 'audio/mpeg',
+      'Content-Disposition': `attachment; filename="${titleName.replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(titleName)}`,
+      'Cache-Control': 'no-store'
+    });
+    if (req.session.drive) drive = startDriveUpload(req.session.drive.tokens, titleName);
+    for (const chunk of queue.splice(0)) writeChunk(chunk);
+    finalize();
+  }
+
+  function finalize() {
+    if (!ffmpegDone) return;
+    if (started) {
+      if (drive && !drive.destroyed) drive.end();
+      res.end();
+      finish();
+      return;
+    }
+    // Finished without audio. Wait for the title so the error can be sent as JSON.
+    if (!haveTitle) return;
+    clearTimeout(timeout);
+    if (!res.headersSent) {
+      const msg = (errText.trim().split('\n').pop() || 'No audio could be extracted from this link.').replace(/^ERROR:\s*/, '');
+      res.status(502).json({ error: msg });
+    }
+    finish();
+  }
+
   try {
-    const title = (await getTitle(url)) || 'audio';
-    const filename = sanitizeFilename(title);
+    // Title lookup and download start together; the response waits only for the title and the first audio bytes.
+    getTitle(url).then((title) => {
+      titleName = sanitizeFilename(title || 'audio');
+      haveTitle = true;
+      tryStart();
+      finalize();   // covers the case where the download already finished without audio
+    });
 
     ytdlp = spawn(YTDLP, ['--no-playlist', '--no-warnings', '-f', 'bestaudio/best', '-o', '-', url]);
     ffmpeg = spawn(FFMPEG, [
       '-hide_banner', '-loglevel', 'error',
       '-i', 'pipe:0', '-vn',
-      '-codec:a', 'libmp3lame', '-q:a', '2',
+      '-codec:a', 'libmp3lame', '-q:a', '4',
       '-f', 'mp3', 'pipe:1'
     ]);
 
@@ -156,41 +204,26 @@ app.get('/api/extract', async (req, res) => {
     ffmpeg.stderr.on('data', (d) => { errText = (errText + d).slice(-2000); });
 
     ffmpeg.stdout.on('data', (chunk) => {
+      sawAudio = true;
       if (!started) {
-        // Send headers only once audio actually starts, so failures can return a JSON error.
-        started = true;
-        res.writeHead(200, {
-          'Content-Type': 'audio/mpeg',
-          'Content-Disposition': `attachment; filename="${filename.replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
-          'Cache-Control': 'no-store'
-        });
-        if (req.session.drive) drive = startDriveUpload(req.session.drive.tokens, filename);
+        queue.push(chunk);
+        tryStart();
+        return;
       }
-      if (drive && !drive.destroyed) drive.write(chunk);
-      if (!res.write(chunk)) {
-        ffmpeg.stdout.pause();
-        res.once('drain', () => ffmpeg.stdout.resume());
-      }
+      writeChunk(chunk);
     });
 
     ytdlp.on('close', (code) => {
-      if (code !== 0 && ffmpeg) ffmpeg.stdin.end();
+      if (code !== 0) errText = (errText + `\nERROR: yt-dlp exited with code ${code}`).slice(-2000);
+      if (ffmpeg) ffmpeg.stdin.end();
     });
 
     ffmpeg.on('close', (code) => {
       clearTimeout(timeout);
-      if (drive && !drive.destroyed) drive.end();
-      if (code !== 0 || !started) {
-        if (code !== 0) console.error('Extraction failed:', errText.trim().split('\n').pop());
-        if (!res.headersSent) {
-          res.status(502).json({ error: (errText.trim().split('\n').pop() || 'Extraction failed.').replace(/^ERROR:\s*/, '') });
-        } else {
-          res.end();
-        }
-      } else {
-        res.end();
-      }
-      finish();
+      ffmpegDone = true;
+      ffmpegCode = code;
+      if (code !== 0) console.error('Extraction failed:', errText.trim().split('\n').pop());
+      finalize();
     });
   } catch (err) {
     clearTimeout(timeout);
