@@ -10,6 +10,8 @@ const { PassThrough } = require('stream');
 const crypto = require('crypto');
 const path = require('path');
 const { google } = require('googleapis');
+const materials = require('./materials');
+const { contentDisposition } = materials;
 
 // ---------- Config ----------
 const PORT = process.env.PORT || 3000;
@@ -270,7 +272,7 @@ app.get('/api/extract', async (req, res) => {
     res.writeHead(200, {
       'Content-Type': 'audio/mpeg',
       ...(expectedSize ? { 'X-Expected-Size': String(expectedSize) } : {}),
-      'Content-Disposition': `attachment; filename="${titleName.replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(titleName)}`,
+      'Content-Disposition': contentDisposition(titleName),
       'Cache-Control': 'no-store'
     });
     console.log(`[extract] host=${host} route=${route} lookup=${lookupMs}ms first-byte=${Date.now() - t0}ms`);
@@ -411,7 +413,7 @@ app.get('/api/extract', async (req, res) => {
 });
 
 // ---------- Materials: find PDFs, books and videos on a page, save the chosen one ----------
-require('./materials').register(app, { acquire, release, oauthClient, YTDLP });
+materials.register(app, { acquire, release, oauthClient, YTDLP });
 
 // ---------- Google Drive connection ----------
 app.get('/api/me', (req, res) => {

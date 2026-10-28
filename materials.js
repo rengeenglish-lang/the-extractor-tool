@@ -184,6 +184,14 @@ function safeName(name, ext) {
   return new RegExp('\\.' + ext + '$', 'i').test(clean) ? clean : `${clean}.${ext}`;
 }
 
+// Content-Disposition value that survives any filename (Turkish, Arabic, emoji): an ASCII fallback
+// for old clients plus the UTF-8 form, since HTTP headers cannot carry other characters directly.
+function contentDisposition(name) {
+  const ascii = String(name).replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '');
+  const star = encodeURIComponent(name).replace(/['()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${star}`;
+}
+
 function lastLine(text, fallback) {
   const lines = String(text || '').trim().split('\n').filter(Boolean);
   return (lines[lines.length - 1] || fallback).replace(/^ERROR:\s*/, '');
@@ -265,7 +273,7 @@ function register(app, deps) {
         // No Drive: send the file straight to the browser.
         res.writeHead(200, {
           'Content-Type': mime,
-          'Content-Disposition': `attachment; filename="${filename.replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+          'Content-Disposition': contentDisposition(filename),
           ...(total && !viaYtdlp ? { 'Content-Length': String(total) } : {}),
           'Cache-Control': 'no-store'
         });
@@ -306,4 +314,4 @@ function register(app, deps) {
   });
 }
 
-module.exports = { register, findMaterials, isPublicHttpUrl };
+module.exports = { register, findMaterials, isPublicHttpUrl, contentDisposition };
