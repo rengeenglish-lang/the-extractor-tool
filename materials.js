@@ -85,6 +85,19 @@ async function safeFetch(url, { pageUrl, cookie, method = 'GET', timeoutMs = 150
   throw new Error('Too many redirects.');
 }
 
+// A clear message for a site that refused us, and a log line (host and status only) for the operator.
+function siteRefused(op, url, status) {
+  let host = '';
+  try { host = new URL(url).host; } catch (_) {}
+  console.log(`[materials] ${op} refused host=${host} http=${status}`);
+  if (status === 401 || status === 403) {
+    return `This site blocked the server (HTTP ${status}). If the page needs a login, paste your cookie under "Site needs a login?". Some sites refuse requests from hosting servers altogether, and then it cannot be fetched here.`;
+  }
+  if (status === 404 || status === 410) return `The page or file was not found (HTTP ${status}).`;
+  if (status === 429) return 'The site is limiting requests (HTTP 429). Try again later.';
+  return `The site answered with HTTP ${status}.`;
+}
+
 // ---------- Finding materials on a page ----------
 function decodeEntities(s) {
   return String(s)
@@ -144,7 +157,7 @@ function findMaterials(html, baseUrl) {
 
 async function discover(pageUrl, cookie) {
   const { res: r, finalUrl } = await safeFetch(pageUrl, { pageUrl, cookie });
-  if (!r.ok) throw new Error(`The site answered with HTTP ${r.status}.`);
+  if (!r.ok) throw new Error(siteRefused('find', finalUrl, r.status));
 
   const type = r.headers.get('content-type') || '';
   if (!/html/i.test(type)) {
@@ -226,8 +239,8 @@ function register(app, deps) {
         proc.stderr.on('data', (d) => { stderr = (stderr + d).slice(-2000); });
         source = proc.stdout;
       } else {
-        const { res: r } = await safeFetch(url, { pageUrl, cookie, timeoutMs: 20000, signal: abort.signal });
-        if (!r.ok || !r.body) throw new Error(`The site answered with HTTP ${r.status}.`);
+        const { res: r, finalUrl } = await safeFetch(url, { pageUrl, cookie, timeoutMs: 20000, signal: abort.signal });
+        if (!r.ok || !r.body) throw new Error(siteRefused('save', finalUrl, r.status));
         total = Number(r.headers.get('content-length')) || 0;
         const type = r.headers.get('content-type') || '';
         if (/text\/html/i.test(type) && cls.kind !== 'video') throw new Error('The link opened a web page, not the file. It may need a login.');
