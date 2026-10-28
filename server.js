@@ -1,30 +1,26 @@
 'use strict';
 
+// Link to MP3: a bridge. Nothing is written to disk on the server.
+// yt-dlp -> ffmpeg -> HTTP response -> the user's device.
+
 const express = require('express');
 const session = require('express-session');
 const { spawn } = require('child_process');
+const { PassThrough } = require('stream');
 const crypto = require('crypto');
-const fs = require('fs');
 const path = require('path');
 const { google } = require('googleapis');
 
 // ---------- Config ----------
 const PORT = process.env.PORT || 3000;
 const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
-const DOWNLOAD_DIR = process.env.DOWNLOAD_DIR || path.join(__dirname, 'downloads');
 const YTDLP = process.env.YTDLP_PATH || 'yt-dlp';
+const FFMPEG = process.env.FFMPEG_PATH || 'ffmpeg';
 const MAX_CONCURRENT = Number(process.env.MAX_CONCURRENT || 2);
-const FILE_TTL_MS = Number(process.env.FILE_TTL_MS || 60 * 60 * 1000); // 1 hour
+const MAX_RUNTIME_MS = Number(process.env.MAX_RUNTIME_MS || 15 * 60 * 1000);
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
-
-fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
-
-// ---------- State ----------
-const jobs = new Map();   // id -> job (server-side only, file paths never sent to clients)
-const queue = [];         // jobs waiting for a free worker
-let active = 0;
 
 // ---------- App ----------
 const app = express();
@@ -39,8 +35,18 @@ app.use(session({
 }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-function oauthClient() {
-  return new google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, `${BASE_URL}/auth/google/callback`);
+// Simple concurrency limit so one user cannot exhaust the host.
+let active = 0;
+const waiting = [];
+function acquire() {
+  return new Promise((resolve) => {
+    if (active < MAX_CONCURRENT) { active++; resolve(); } else waiting.push(resolve);
+  });
+}
+function release() {
+  active--;
+  const next = waiting.shift();
+  if (next) { active++; next(); }
 }
 
 function isHttpUrl(s) {
@@ -52,142 +58,146 @@ function isHttpUrl(s) {
   }
 }
 
-function lastLine(text) {
-  const lines = String(text || '').trim().split('\n').filter(Boolean);
-  return (lines[lines.length - 1] || '').replace(/^ERROR:\s*/, '');
+function sanitizeFilename(name) {
+  const clean = String(name || '')
+    .replace(/[\\/:*?"<>|\x00-\x1f]+/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 150);
+  return (clean || 'audio') + '.mp3';
 }
 
-function publicJob(job) {
-  return {
-    id: job.id,
-    url: job.url,
-    status: job.status,           // queued | running | done | error
-    progress: job.progress,
-    title: job.title,
-    filename: job.filename,
-    error: job.error,
-    drive: job.drive              // null | { status: pending|uploading|saved|error, ... }
-  };
+function oauthClient() {
+  return new google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, `${BASE_URL}/auth/google/callback`);
 }
 
-// ---------- Extraction ----------
-app.post('/api/jobs', (req, res) => {
-  const url = String((req.body && req.body.url) || '').trim();
-  if (!isHttpUrl(url)) return res.status(400).json({ error: 'Enter a valid http(s) URL.' });
-
-  const id = crypto.randomUUID();
-  const dir = path.join(DOWNLOAD_DIR, id);
-  fs.mkdirSync(dir, { recursive: true });
-
-  const driveTokens = req.session.drive ? req.session.drive.tokens : null;
-  const job = {
-    id, url, dir,
-    status: 'queued',
-    progress: 0,
-    title: null,
-    filename: null,
-    filePath: null,
-    error: null,
-    drive: driveTokens ? { status: 'pending' } : null,
-    driveTokens,
-    createdAt: Date.now()
-  };
-  jobs.set(id, job);
-  queue.push(job);
-  pump();
-  res.status(202).json({ id });
-});
-
-function pump() {
-  while (active < MAX_CONCURRENT && queue.length) {
-    const job = queue.shift();
-    active++;
-    runJob(job).finally(() => { active--; pump(); });
-  }
-}
-
-function runJob(job) {
+// Ask yt-dlp for the title only (no download) so the browser gets a sensible file name.
+function getTitle(url) {
   return new Promise((resolve) => {
-    job.status = 'running';
-    const args = [
-      '--no-playlist',
-      '--no-warnings',
-      '--newline',
-      '-x',
-      '--audio-format', 'mp3',
-      '--audio-quality', '0',
-      '-o', path.join(job.dir, '%(title).150B [%(id)s].%(ext)s'),
-      job.url
-    ];
-
-    const proc = spawn(YTDLP, args);
-    let stderr = '';
-
-    proc.stdout.on('data', (chunk) => {
-      for (const line of chunk.toString().split('\n')) {
-        const m = line.match(/\[download\]\s+([\d.]+)%/);
-        if (m) job.progress = Math.min(95, parseFloat(m[1]));
-      }
-    });
-    proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
-
-    proc.on('error', (err) => {
-      job.status = 'error';
-      job.error = err.code === 'ENOENT' ? 'yt-dlp is not installed on the server.' : err.message;
-      resolve();
-    });
-
-    proc.on('close', (code) => {
-      if (code !== 0) {
-        job.status = 'error';
-        job.error = lastLine(stderr) || `Extraction failed (exit code ${code}).`;
-        return resolve();
-      }
-      const mp3 = fs.readdirSync(job.dir).find((f) => f.toLowerCase().endsWith('.mp3'));
-      if (!mp3) {
-        job.status = 'error';
-        job.error = 'No MP3 was produced. ffmpeg may be missing on the server.';
-        return resolve();
-      }
-      job.filename = mp3;
-      job.filePath = path.join(job.dir, mp3);
-      job.title = mp3.replace(/\.mp3$/i, '');
-      job.progress = 100;
-      job.status = 'done';
-      resolve();
-      if (job.driveTokens) uploadToDrive(job);   // starts immediately, does not block the download
+    const p = spawn(YTDLP, ['--no-playlist', '--no-warnings', '--skip-download', '--print', '%(title)s', url]);
+    let out = '';
+    const timer = setTimeout(() => p.kill('SIGKILL'), 60 * 1000);
+    p.stdout.on('data', (d) => { out += d; });
+    p.on('error', () => { clearTimeout(timer); resolve(null); });
+    p.on('close', (code) => {
+      clearTimeout(timer);
+      resolve(code === 0 ? out.trim().split('\n')[0] || null : null);
     });
   });
 }
 
-// ---------- Google Drive ----------
-async function uploadToDrive(job) {
-  job.drive = { status: 'uploading' };
-  try {
-    const client = oauthClient();
-    client.setCredentials(job.driveTokens);
-    const drive = google.drive({ version: 'v3', auth: client });
-    const { data } = await drive.files.create({
-      requestBody: { name: job.filename },
-      media: { mimeType: 'audio/mpeg', body: fs.createReadStream(job.filePath) },
-      fields: 'id,name,webViewLink'
-    });
-    job.drive = { status: 'saved', id: data.id, name: data.name, link: data.webViewLink };
-  } catch (err) {
-    job.drive = { status: 'error', error: err.message || 'Upload to Google Drive failed.' };
-  }
+// Optional Google Drive copy. Streams the same bytes to Drive as they go to the device.
+// Nothing is buffered on disk; the upload runs alongside the download.
+function startDriveUpload(tokens, filename) {
+  const pass = new PassThrough();
+  pass.on('error', () => {});
+  (async () => {
+    try {
+      const client = oauthClient();
+      client.setCredentials(tokens);
+      const drive = google.drive({ version: 'v3', auth: client });
+      await drive.files.create({
+        requestBody: { name: filename },
+        media: { mimeType: 'audio/mpeg', body: pass },
+        fields: 'id'
+      });
+    } catch (err) {
+      console.error('Drive upload failed:', err.message);
+      pass.destroy();
+    }
+  })();
+  return pass;
 }
 
-app.get('/api/jobs/:id', (req, res) => {
-  const job = jobs.get(req.params.id);
-  if (!job) return res.status(404).json({ error: 'Job not found or expired.' });
-  res.json(publicJob(job));
-});
+// ---------- Extraction bridge ----------
+app.get('/api/extract', async (req, res) => {
+  const url = String(req.query.url || '').trim();
+  if (!isHttpUrl(url)) return res.status(400).json({ error: 'Enter a valid http(s) URL.' });
 
-app.get('/api/jobs/:id/file', (req, res) => {
-  const job = jobs.get(req.params.id);
-  if (!job || job.status !== 'done' || !job.filePath) return res.status(404).send('File not available.');
-  res.download(job.filePath, job.filename);
+  await acquire();
+  let released = false;
+  const finish = () => { if (!released) { released = true; release(); } };
+
+  let ytdlp = null;
+  let ffmpeg = null;
+  let drive = null;
+  let started = false;
+  let errText = '';
+
+  const killAll = () => {
+    if (ytdlp) ytdlp.kill('SIGKILL');
+    if (ffmpeg) ffmpeg.kill('SIGKILL');
+  };
+
+  // Client went away or the request ended: stop the work and free the slot.
+  res.on('close', () => {
+    if (!res.writableFinished) killAll();
+    finish();
+  });
+
+  const timeout = setTimeout(killAll, MAX_RUNTIME_MS);
+
+  try {
+    const title = (await getTitle(url)) || 'audio';
+    const filename = sanitizeFilename(title);
+
+    ytdlp = spawn(YTDLP, ['--no-playlist', '--no-warnings', '-f', 'bestaudio/best', '-o', '-', url]);
+    ffmpeg = spawn(FFMPEG, [
+      '-hide_banner', '-loglevel', 'error',
+      '-i', 'pipe:0', '-vn',
+      '-codec:a', 'libmp3lame', '-q:a', '2',
+      '-f', 'mp3', 'pipe:1'
+    ]);
+
+    ytdlp.stdout.pipe(ffmpeg.stdin);
+    ytdlp.stdout.on('error', () => {});
+    ffmpeg.stdin.on('error', () => {});
+    ytdlp.stderr.on('data', (d) => { errText = (errText + d).slice(-2000); });
+    ffmpeg.stderr.on('data', (d) => { errText = (errText + d).slice(-2000); });
+
+    ffmpeg.stdout.on('data', (chunk) => {
+      if (!started) {
+        // Send headers only once audio actually starts, so failures can return a JSON error.
+        started = true;
+        res.writeHead(200, {
+          'Content-Type': 'audio/mpeg',
+          'Content-Disposition': `attachment; filename="${filename.replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+          'Cache-Control': 'no-store'
+        });
+        if (req.session.drive) drive = startDriveUpload(req.session.drive.tokens, filename);
+      }
+      if (drive && !drive.destroyed) drive.write(chunk);
+      if (!res.write(chunk)) {
+        ffmpeg.stdout.pause();
+        res.once('drain', () => ffmpeg.stdout.resume());
+      }
+    });
+
+    ytdlp.on('close', (code) => {
+      if (code !== 0 && ffmpeg) ffmpeg.stdin.end();
+    });
+
+    ffmpeg.on('close', (code) => {
+      clearTimeout(timeout);
+      if (drive && !drive.destroyed) drive.end();
+      if (code !== 0 || !started) {
+        if (code !== 0) console.error('Extraction failed:', errText.trim().split('\n').pop());
+        if (!res.headersSent) {
+          res.status(502).json({ error: (errText.trim().split('\n').pop() || 'Extraction failed.').replace(/^ERROR:\s*/, '') });
+        } else {
+          res.end();
+        }
+      } else {
+        res.end();
+      }
+      finish();
+    });
+  } catch (err) {
+    clearTimeout(timeout);
+    killAll();
+    finish();
+    if (!res.headersSent) res.status(500).json({ error: 'Server error while starting extraction.' });
+  }
 });
 
 // ---------- Google Drive connection ----------
@@ -229,17 +239,6 @@ app.post('/auth/google/disconnect', (req, res) => {
   res.json({ ok: true });
 });
 
-// ---------- Cleanup ----------
-setInterval(() => {
-  const now = Date.now();
-  for (const [id, job] of jobs) {
-    if (now - job.createdAt > FILE_TTL_MS) {
-      fs.rmSync(job.dir, { recursive: true, force: true });
-      jobs.delete(id);
-    }
-  }
-}, 5 * 60 * 1000).unref();
-
 app.listen(PORT, () => {
-  console.log(`Audio Extractor running at ${BASE_URL}`);
+  console.log(`Link to MP3 running at ${BASE_URL}`);
 });

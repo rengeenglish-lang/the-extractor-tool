@@ -31,37 +31,27 @@
   button.ghost { background: transparent; color: var(--text); border-color: var(--border); }
   button.ghost:hover { border-color: var(--accent); }
   button:disabled { opacity: .5; cursor: not-allowed; }
-  .msg { color: var(--danger); font-size: 14px; min-height: 20px; margin: 8px 2px 0; }
+  .status { font-size: 14px; min-height: 22px; margin: 12px 2px 0; color: var(--muted); }
+  .status.err { color: var(--danger); }
+  .status.ok { color: var(--ok); }
   .drive { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); font-size: 14px; }
   .drive .state { color: var(--muted); }
   .drive .state b { color: var(--ok); font-weight: 600; }
   .hidden { display: none !important; }
-  #jobs { display: flex; flex-direction: column; gap: 12px; margin-top: 20px; }
-  .job { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
-  .job .title { font-weight: 600; word-break: break-all; font-size: 14px; }
-  .bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin: 10px 0 8px; }
-  .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
-  .status { font-size: 13px; color: var(--muted); }
-  .status.err { color: var(--danger); }
-  .status.ok { color: var(--ok); }
-  .actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
-  a.btn { display: inline-block; background: var(--accent); color: #fff; text-decoration: none; border-radius: 8px; padding: 8px 14px; font-size: 14px; }
-  a.btn:hover { background: var(--accent-hover); }
-  a.link { color: var(--accent); font-size: 14px; align-self: center; }
   footer { color: var(--muted); font-size: 12px; margin-top: 28px; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>Link to MP3</h1>
-  <p class="sub">Paste a link. The audio is extracted, downloaded to your computer, and saved to Google Drive if connected.</p>
+  <p class="sub">Paste a link. The audio is converted and sent straight to your device. Nothing is stored on the server.</p>
 
   <div class="panel">
     <form id="form" autocomplete="off">
       <input type="url" id="url" placeholder="https://" required>
       <button type="submit" class="primary" id="go">Extract audio</button>
     </form>
-    <div class="msg" id="msg"></div>
+    <div class="status" id="status"></div>
 
     <div class="drive">
       <div class="state" id="driveState">Google Drive: not connected</div>
@@ -72,17 +62,22 @@
     </div>
   </div>
 
-  <div id="jobs"></div>
-
-  <footer>Only process content you have the right to use. Files are removed from the server after one hour.</footer>
+  <footer>Only process content you have the right to use.</footer>
 </div>
 
 <script>
 (() => {
   const $ = (s) => document.querySelector(s);
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const statusEl = $('#status');
 
-  // ---------- Drive state ----------
+  function setStatus(text, cls) {
+    statusEl.className = 'status' + (cls ? ' ' + cls : '');
+    statusEl.textContent = text;
+  }
+
+  function fmtMB(bytes) { return (bytes / 1024 / 1024).toFixed(1) + ' MB'; }
+
+  // ---------- Google Drive state ----------
   async function loadMe() {
     try {
       const me = await (await fetch('/api/me')).json();
@@ -98,7 +93,7 @@
       state.innerHTML = '';
       const b = document.createElement('b');
       b.textContent = 'Connected';
-      state.append('Google Drive: ', b, ' · new audio is saved automatically');
+      state.append('Google Drive: ', b, ' · each extraction is also saved to Drive');
       connect.classList.add('hidden');
       disconnect.classList.remove('hidden');
     } else {
@@ -115,115 +110,64 @@
     loadMe();
   });
 
-  // ---------- Submit ----------
+  // ---------- Extract and save to device ----------
+  function filenameFrom(disposition) {
+    if (!disposition) return 'audio.mp3';
+    const star = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
+    if (star) return decodeURIComponent(star[1]);
+    const plain = /filename="([^"]+)"/i.exec(disposition);
+    return plain ? plain[1] : 'audio.mp3';
+  }
+
   $('#form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const url = $('#url').value.trim();
-    const msg = $('#msg');
-    msg.textContent = '';
     if (!url) return;
 
-    $('#go').disabled = true;
+    const btn = $('#go');
+    btn.disabled = true;
+    setStatus('Extracting audio…');
+
     try {
-      const r = await fetch('/api/jobs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url })
-      });
-      const data = await r.json();
-      if (!r.ok) { msg.textContent = data.error || 'Request failed.'; return; }
-      $('#url').value = '';
-      addCard(data.id, url);
-    } catch (err) {
-      msg.textContent = 'Could not reach the server.';
-    } finally {
-      $('#go').disabled = false;
-    }
-  });
-
-  // ---------- Job cards ----------
-  function addCard(id, url) {
-    const card = document.createElement('div');
-    card.className = 'job';
-    card.innerHTML = `
-      <div class="title"></div>
-      <div class="bar"><div></div></div>
-      <div class="status">Queued…</div>
-      <div class="actions"></div>`;
-    card.querySelector('.title').textContent = url;
-    $('#jobs').prepend(card);
-    track(id, card);
-  }
-
-  async function track(id, card) {
-    const bar = card.querySelector('.bar > div');
-    const status = card.querySelector('.status');
-    const actions = card.querySelector('.actions');
-
-    while (true) {
-      let j;
-      try {
-        const r = await fetch(`/api/jobs/${id}`);
-        if (!r.ok) { setStatus(status, 'err', 'Job expired. Submit the link again.'); return; }
-        j = await r.json();
-      } catch (_) {
-        await sleep(2000);
-        continue;
-      }
-
-      bar.style.width = j.progress + '%';
-
-      if (j.status === 'error') {
-        setStatus(status, 'err', j.error || 'Extraction failed.');
+      const res = await fetch('/api/extract?url=' + encodeURIComponent(url));
+      if (!res.ok) {
+        let msg = 'Extraction failed.';
+        try { msg = (await res.json()).error || msg; } catch (_) {}
+        setStatus(msg, 'err');
         return;
       }
 
-      if (j.status === 'queued') {
-        setStatus(status, '', 'Waiting in queue…');
-      } else if (j.status === 'running') {
-        setStatus(status, '', `Extracting audio… ${Math.round(j.progress)}%`);
-      } else if (j.status === 'done') {
-        card.querySelector('.title').textContent = j.title || j.filename;
-        if (!actions.querySelector('a')) {
-          const a = document.createElement('a');
-          a.className = 'btn';
-          a.href = `/api/jobs/${id}/file`;
-          a.setAttribute('download', '');
-          a.textContent = 'Download MP3';
-          actions.appendChild(a);
-        }
-        const d = j.drive;
-        if (!d) {
-          setStatus(status, 'ok', 'Ready');
-          return;
-        }
-        if (d.status === 'pending' || d.status === 'uploading') {
-          setStatus(status, '', 'Ready · saving to Google Drive…');
-        } else if (d.status === 'saved') {
-          setStatus(status, 'ok', 'Ready · saved to Google Drive');
-          if (d.link && !actions.querySelector('.drivelink')) {
-            const a = document.createElement('a');
-            a.className = 'link drivelink';
-            a.href = d.link;
-            a.target = '_blank';
-            a.rel = 'noopener';
-            a.textContent = 'Open in Drive';
-            actions.appendChild(a);
-          }
-          return;
-        } else if (d.status === 'error') {
-          setStatus(status, 'err', 'Ready · Drive upload failed: ' + (d.error || 'unknown error'));
-          return;
-        }
+      // Read the stream as it arrives so progress is visible.
+      const reader = res.body.getReader();
+      const chunks = [];
+      let received = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        received += value.length;
+        setStatus(`Downloading… ${fmtMB(received)}`);
       }
-      await sleep(1000);
-    }
-  }
 
-  function setStatus(el, cls, text) {
-    el.className = 'status' + (cls ? ' ' + cls : '');
-    el.textContent = text;
-  }
+      const blob = new Blob(chunks, { type: 'audio/mpeg' });
+      const name = filenameFrom(res.headers.get('Content-Disposition'));
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 60 * 1000);
+
+      setStatus(`Saved to your device: ${name} (${fmtMB(received)})`, 'ok');
+      $('#url').value = '';
+    } catch (err) {
+      setStatus('Could not reach the server, or the download was interrupted.', 'err');
+    } finally {
+      btn.disabled = false;
+    }
+  });
 
   loadMe();
 })();
