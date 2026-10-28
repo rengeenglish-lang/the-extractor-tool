@@ -46,7 +46,27 @@
     background: radial-gradient(900px 360px at 50% -120px, color-mix(in srgb, var(--accent) 20%, transparent), transparent), var(--bg);
     background-repeat: no-repeat;
   }
-  .wrap { max-width: 760px; margin: 0 auto; padding: 28px 16px 56px; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 28px 16px 56px; }
+  #paneAudio { max-width: 760px; margin: 0 auto; }
+
+  /* Files tab: search card on the left, results on the right */
+  .files-grid { display: grid; grid-template-columns: minmax(320px, 400px) minmax(0, 1fr); gap: 18px; align-items: start; align-content: center; min-height: calc(100vh - 260px); }
+  .files-grid.hidden { display: none !important; }
+  .search-card { position: sticky; top: 16px; }
+  .search-card form { flex-direction: column; }
+  .search-card form input[type="url"] { flex: none; width: 100%; }
+  .search-card form button { width: 100%; }
+  .scan-opt { flex-wrap: wrap; }
+  .scan-opt small { flex-basis: 100%; margin-left: 25px; }
+  .results-card { min-height: 360px; }
+  .results-card .items { max-height: calc(100vh - 330px); min-height: 80px; overflow-y: auto; padding-right: 4px; }
+  .placeholder { margin: 40px 8px; text-align: center; color: var(--muted); font-size: 14px; }
+  .results-card:has(.status:not([hidden])) .placeholder, .results-card:has(.items li) .placeholder { display: none; }
+  @media (max-width: 860px) {
+    .files-grid { grid-template-columns: minmax(0, 1fr); }
+    .search-card { position: static; }
+    .results-card .items { max-height: none; }
+  }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .hidden { display: none !important; }
 
@@ -72,7 +92,7 @@
   .drive-pill .note { color: var(--muted); }
 
   /* Tabs */
-  .tabs { display: flex; gap: 4px; padding: 4px; background: color-mix(in srgb, var(--accent) 10%, var(--border)); border-radius: 14px; margin-bottom: 14px; }
+  .tabs { display: flex; gap: 4px; padding: 4px; max-width: 440px; margin-left: auto; margin-right: auto; background: color-mix(in srgb, var(--accent) 10%, var(--border)); border-radius: 14px; margin-bottom: 14px; }
   .tab { flex: 1; border: 0; background: transparent; color: var(--muted); padding: 11px 12px; border-radius: 10px; font: inherit; font-weight: 600; cursor: pointer; transition: background .15s, color .15s; }
   .tab:hover { color: var(--text); }
   .tab[aria-selected="true"] { background: var(--panel); color: var(--accent); box-shadow: 0 1px 3px rgba(0, 0, 0, .14); }
@@ -190,7 +210,8 @@
     <div class="bar hidden" id="bar"><div id="barFill"></div></div>
   </section>
 
-  <section class="panel hidden" id="paneFiles" role="tabpanel" aria-labelledby="tabFiles">
+  <section class="files-grid hidden" id="paneFiles" role="tabpanel" aria-labelledby="tabFiles">
+   <div class="panel search-card">
     <h2>Find books and videos on a website</h2>
     <p class="lede">Paste a website, not a file. The tool scans the site for PDFs, e-books, videos and audio files and lists them as it finds them. Pick one and it is saved to your Google Drive, or to your device if Drive is not connected.</p>
     <form id="findForm" autocomplete="off">
@@ -204,6 +225,9 @@
       <p>Paste the <code>Cookie</code> request header from your browser while logged in (developer tools, Network tab). It is used for this request only, sent only to that site, and never stored or logged. Only use content you are allowed to download.</p>
       <textarea id="cookie" rows="2" placeholder="name=value; name2=value2" aria-label="Cookie header"></textarea>
     </details>
+   </div>
+   <div class="panel results-card">
+    <h2>Results</h2>
     <div class="status" id="findStatus" role="status" aria-live="polite" hidden><span class="spin"></span><span class="msg"></span></div>
     <div class="bar hidden" id="saveBar"><div id="saveBarFill"></div></div>
 
@@ -213,6 +237,8 @@
     </div>
     <ul class="items" id="items"></ul>
     <p class="empty hidden" id="empty">No files match.</p>
+    <p class="placeholder">Books, videos and audio files found on the site will be listed here.</p>
+   </div>
   </section>
 
   <footer>Only process content you have the right to use.</footer>
