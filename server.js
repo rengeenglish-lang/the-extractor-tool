@@ -95,7 +95,7 @@ function getTitle(url) {
 // which avoids piping containers that cannot be streamed (such as m4a with its index at the end).
 function getDirectUrl(url) {
   return new Promise((resolve) => {
-    const p = spawn(YTDLP, ['--no-playlist', '--no-warnings', '-f', 'bestaudio/best', '-g', url]);
+    const p = spawn(YTDLP, ['--no-playlist', '--no-warnings', '--impersonate', 'chrome', '-f', 'bestaudio/best', '-j', url]);
     let out = '';
     let err = '';
     const timer = setTimeout(() => p.kill('SIGKILL'), 60 * 1000);
@@ -107,9 +107,15 @@ function getDirectUrl(url) {
     });
     p.on('close', (code) => {
       clearTimeout(timer);
-      const line = out.trim().split('\n')[0];
-      if (code === 0 && line) resolve({ ok: true, url: line });
-      else resolve({ ok: false, error: lastErrorLine(err, 'No audio could be found at this link.') });
+      if (code !== 0) return resolve({ ok: false, error: lastErrorLine(err, 'No audio could be found at this link.') });
+      try {
+        const info = JSON.parse(out);
+        const fmt = (info.requested_formats && info.requested_formats[0]) || info;
+        if (!fmt.url) throw new Error('no url');
+        resolve({ ok: true, url: fmt.url, headers: fmt.http_headers || {} });
+      } catch (_) {
+        resolve({ ok: false, error: 'Could not read the audio stream for this link.' });
+      }
     });
   });
 }
@@ -218,8 +224,13 @@ app.get('/api/extract', async (req, res) => {
       return;
     }
 
+    // Pass the site's own request headers (user agent, referer, etc.) so ffmpeg can read the stream.
+    const headerText = Object.entries(direct.headers || {}).map(([k, v]) => `${k}: ${v}\r\n`).join('');
+    const headerArgs = headerText ? ['-headers', headerText] : [];
+
     ffmpeg = spawn(FFMPEG, [
       '-hide_banner', '-loglevel', 'error',
+      ...headerArgs,
       '-i', direct.url, '-vn',
       '-codec:a', 'libmp3lame', '-q:a', '4',
       '-f', 'mp3', 'pipe:1'
