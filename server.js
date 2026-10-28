@@ -139,14 +139,20 @@ async function scrapePage(url) {
       redirect: 'follow',
       signal: AbortSignal.timeout(6000)
     });
-    if (!r.ok || !/html/i.test(r.headers.get('content-type') || '')) return null;
+    if (!r.ok || !/html/i.test(r.headers.get('content-type') || '')) {
+      console.log(`[scrape] skipped: http ${r.status} ${r.headers.get('content-type') || ''}`);
+      return null;
+    }
     const html = (await r.text()).slice(0, 2 * 1024 * 1024);
 
     const found = new Set();
     for (const m of html.matchAll(AUDIO_IN_HTML)) {
       try { found.add(new URL(m[1].replace(/&amp;/g, '&'), r.url).href); } catch (_) {}
     }
-    if (found.size !== 1) return null;
+    if (found.size !== 1) {
+      console.log(`[scrape] skipped: ${found.size} audio files found on the page`);
+      return null;
+    }
 
     const audioUrl = [...found][0];
     const t = /<title[^>]*>([^<]*)<\/title>/i.exec(html);
@@ -160,7 +166,8 @@ async function scrapePage(url) {
       isMp3: !!ext && ext[1].toLowerCase() === 'mp3',
       guessed: true
     };
-  } catch (_) {
+  } catch (e) {
+    console.log(`[scrape] skipped: ${e.name || 'error'} ${e.message || ''}`.trim());
     return null;
   }
 }
@@ -233,6 +240,10 @@ app.get('/api/extract', async (req, res) => {
   let ffmpegCode = null;
   let sawAudio = false;
   const queue = [];         // audio chunks produced before the headers can be sent
+  const t0 = Date.now();    // timing log: which route found the audio and how long each step took
+  const host = new URL(url).host;
+  let route = 'unknown';
+  let lookupMs = 0;
 
   const killAll = () => {
     if (ffmpeg) ffmpeg.kill('SIGKILL');
@@ -262,6 +273,7 @@ app.get('/api/extract', async (req, res) => {
       'Content-Disposition': `attachment; filename="${titleName.replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(titleName)}`,
       'Cache-Control': 'no-store'
     });
+    console.log(`[extract] host=${host} route=${route} lookup=${lookupMs}ms first-byte=${Date.now() - t0}ms`);
     if (req.session.drive) drive = startDriveUpload(req.session.drive.tokens, titleName);
     for (const chunk of queue.splice(0)) writeChunk(chunk);
     finalize();
@@ -271,6 +283,7 @@ app.get('/api/extract', async (req, res) => {
     if (!ffmpegDone) return;
     if (started) {
       if (drive && !drive.destroyed) drive.end();
+      console.log(`[extract] host=${host} route=${route} done total=${Date.now() - t0}ms code=${ffmpegCode}`);
       res.end();
       finish();
       return;
@@ -332,7 +345,10 @@ app.get('/api/extract', async (req, res) => {
 
       // A link that looked like an audio file but could not be read: ask yt-dlp instead.
       if (code !== 0 && !sawAudio && direct.guessed && !res.destroyed) {
+        const tf = Date.now();
         const found = await getDirectUrl(url);
+        route = 'ytdlp-after-failed-direct';
+        lookupMs += Date.now() - tf;
         if (!found.ok) return fail(found.error);
         rememberSource(url, found);
         return launch(found);
@@ -351,6 +367,7 @@ app.get('/api/extract', async (req, res) => {
     // A link that already points at an audio file skips the yt-dlp lookup.
     const guess = guessDirectAudio(url);
     if (guess) {
+      route = 'direct-link';
       headSize(url).then((n) => { expectedSize = n; sizeReady = true; tryStart(); });
       launch({ ...guess, sizePending: true });
       return;
@@ -359,19 +376,27 @@ app.get('/api/extract', async (req, res) => {
     // Same link a moment ago: reuse the result. If it no longer works, launch() retries with yt-dlp.
     const cached = cachedSource(url);
     if (cached) {
+      route = 'cache';
       launch({ ...cached, guessed: true });
       return;
     }
 
+    const ts = Date.now();
     const scraped = await scrapePage(url);
+    const scrapeMs = Date.now() - ts;
     if (scraped) {
+      route = 'scrape';
+      lookupMs = scrapeMs;
       rememberSource(url, scraped);
       headSize(scraped.url, scraped.headers).then((n) => { scraped.size = n; expectedSize = n; sizeReady = true; tryStart(); });
       launch({ ...scraped, sizePending: true });
       return;
     }
 
+    const ty = Date.now();
     const direct = await getDirectUrl(url);
+    route = `ytdlp(scrape-skipped ${scrapeMs}ms)`;
+    lookupMs = scrapeMs + (Date.now() - ty);
     titleName = sanitizeFilename(direct.title || 'audio');
     haveTitle = true;
     if (!direct.ok) return fail(direct.error);
