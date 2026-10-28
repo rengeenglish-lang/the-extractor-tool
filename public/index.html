@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Link to MP3</title>
+<style>
+  :root {
+    --bg: #f6f5f2; --panel: #fff; --text: #1c1c1a; --muted: #6b6a64;
+    --border: #e2e0da; --accent: #2f6f5e; --accent-hover: #245949;
+    --danger: #a33a2b; --ok: #2f6f3e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161614; --panel: #1f1f1c; --text: #ecebe6; --muted: #9a998f;
+      --border: #33332f; --accent: #5fb89f; --accent-hover: #7cc9b2;
+      --danger: #e0786a; --ok: #7cc98a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 32px 16px 48px; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+  form { display: flex; gap: 10px; flex-wrap: wrap; }
+  input[type="url"] { flex: 1 1 360px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; }
+  button { font: inherit; border-radius: 8px; padding: 12px 18px; cursor: pointer; border: 1px solid var(--accent); }
+  button.primary { background: var(--accent); color: #fff; }
+  button.primary:hover { background: var(--accent-hover); }
+  button.ghost { background: transparent; color: var(--text); border-color: var(--border); }
+  button.ghost:hover { border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .msg { color: var(--danger); font-size: 14px; min-height: 20px; margin: 8px 2px 0; }
+  .drive { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); font-size: 14px; }
+  .drive .state { color: var(--muted); }
+  .drive .state b { color: var(--ok); font-weight: 600; }
+  .hidden { display: none !important; }
+  #jobs { display: flex; flex-direction: column; gap: 12px; margin-top: 20px; }
+  .job { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+  .job .title { font-weight: 600; word-break: break-all; font-size: 14px; }
+  .bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin: 10px 0 8px; }
+  .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+  .status { font-size: 13px; color: var(--muted); }
+  .status.err { color: var(--danger); }
+  .status.ok { color: var(--ok); }
+  .actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  a.btn { display: inline-block; background: var(--accent); color: #fff; text-decoration: none; border-radius: 8px; padding: 8px 14px; font-size: 14px; }
+  a.btn:hover { background: var(--accent-hover); }
+  a.link { color: var(--accent); font-size: 14px; align-self: center; }
+  footer { color: var(--muted); font-size: 12px; margin-top: 28px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Link to MP3</h1>
+  <p class="sub">Paste a link. The audio is extracted, downloaded to your computer, and saved to Google Drive if connected.</p>
+
+  <div class="panel">
+    <form id="form" autocomplete="off">
+      <input type="url" id="url" placeholder="https://" required>
+      <button type="submit" class="primary" id="go">Extract audio</button>
+    </form>
+    <div class="msg" id="msg"></div>
+
+    <div class="drive">
+      <div class="state" id="driveState">Google Drive: not connected</div>
+      <div>
+        <button class="ghost hidden" id="driveConnect">Connect Google Drive</button>
+        <button class="ghost hidden" id="driveDisconnect">Disconnect</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="jobs"></div>
+
+  <footer>Only process content you have the right to use. Files are removed from the server after one hour.</footer>
+</div>
+
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // ---------- Drive state ----------
+  async function loadMe() {
+    try {
+      const me = await (await fetch('/api/me')).json();
+      renderDrive(me);
+    } catch (_) {}
+  }
+
+  function renderDrive(me) {
+    const state = $('#driveState');
+    const connect = $('#driveConnect');
+    const disconnect = $('#driveDisconnect');
+    if (me.drive) {
+      state.innerHTML = '';
+      const b = document.createElement('b');
+      b.textContent = 'Connected';
+      state.append('Google Drive: ', b, ' · new audio is saved automatically');
+      connect.classList.add('hidden');
+      disconnect.classList.remove('hidden');
+    } else {
+      state.textContent = 'Google Drive: not connected';
+      disconnect.classList.add('hidden');
+      connect.classList.toggle('hidden', !me.driveConfigured);
+      if (!me.driveConfigured) state.textContent += ' (not configured on the server)';
+    }
+  }
+
+  $('#driveConnect').addEventListener('click', () => { location.href = '/auth/google'; });
+  $('#driveDisconnect').addEventListener('click', async () => {
+    await fetch('/auth/google/disconnect', { method: 'POST' });
+    loadMe();
+  });
+
+  // ---------- Submit ----------
+  $('#form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const url = $('#url').value.trim();
+    const msg = $('#msg');
+    msg.textContent = '';
+    if (!url) return;
+
+    $('#go').disabled = true;
+    try {
+      const r = await fetch('/api/jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
+      });
+      const data = await r.json();
+      if (!r.ok) { msg.textContent = data.error || 'Request failed.'; return; }
+      $('#url').value = '';
+      addCard(data.id, url);
+    } catch (err) {
+      msg.textContent = 'Could not reach the server.';
+    } finally {
+      $('#go').disabled = false;
+    }
+  });
+
+  // ---------- Job cards ----------
+  function addCard(id, url) {
+    const card = document.createElement('div');
+    card.className = 'job';
+    card.innerHTML = `
+      <div class="title"></div>
+      <div class="bar"><div></div></div>
+      <div class="status">Queued…</div>
+      <div class="actions"></div>`;
+    card.querySelector('.title').textContent = url;
+    $('#jobs').prepend(card);
+    track(id, card);
+  }
+
+  async function track(id, card) {
+    const bar = card.querySelector('.bar > div');
+    const status = card.querySelector('.status');
+    const actions = card.querySelector('.actions');
+
+    while (true) {
+      let j;
+      try {
+        const r = await fetch(`/api/jobs/${id}`);
+        if (!r.ok) { setStatus(status, 'err', 'Job expired. Submit the link again.'); return; }
+        j = await r.json();
+      } catch (_) {
+        await sleep(2000);
+        continue;
+      }
+
+      bar.style.width = j.progress + '%';
+
+      if (j.status === 'error') {
+        setStatus(status, 'err', j.error || 'Extraction failed.');
+        return;
+      }
+
+      if (j.status === 'queued') {
+        setStatus(status, '', 'Waiting in queue…');
+      } else if (j.status === 'running') {
+        setStatus(status, '', `Extracting audio… ${Math.round(j.progress)}%`);
+      } else if (j.status === 'done') {
+        card.querySelector('.title').textContent = j.title || j.filename;
+        if (!actions.querySelector('a')) {
+          const a = document.createElement('a');
+          a.className = 'btn';
+          a.href = `/api/jobs/${id}/file`;
+          a.setAttribute('download', '');
+          a.textContent = 'Download MP3';
+          actions.appendChild(a);
+        }
+        const d = j.drive;
+        if (!d) {
+          setStatus(status, 'ok', 'Ready');
+          return;
+        }
+        if (d.status === 'pending' || d.status === 'uploading') {
+          setStatus(status, '', 'Ready · saving to Google Drive…');
+        } else if (d.status === 'saved') {
+          setStatus(status, 'ok', 'Ready · saved to Google Drive');
+          if (d.link && !actions.querySelector('.drivelink')) {
+            const a = document.createElement('a');
+            a.className = 'link drivelink';
+            a.href = d.link;
+            a.target = '_blank';
+            a.rel = 'noopener';
+            a.textContent = 'Open in Drive';
+            actions.appendChild(a);
+          }
+          return;
+        } else if (d.status === 'error') {
+          setStatus(status, 'err', 'Ready · Drive upload failed: ' + (d.error || 'unknown error'));
+          return;
+        }
+      }
+      await sleep(1000);
+    }
+  }
+
+  function setStatus(el, cls, text) {
+    el.className = 'status' + (cls ? ' ' + cls : '');
+    el.textContent = text;
+  }
+
+  loadMe();
+})();
+</script>
+</body>
+</html>
