@@ -3,95 +3,172 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Link to MP3</title>
+<title>The Extractor</title>
 <style>
   :root {
-    --bg: #f6f5f2; --panel: #fff; --text: #1c1c1a; --muted: #6b6a64;
-    --border: #e2e0da; --accent: #2f6f5e; --accent-hover: #245949;
-    --danger: #a33a2b; --ok: #2f6f3e;
+    --bg: #f5f4f0; --panel: #ffffff; --soft: #faf9f6; --text: #1b1b18; --muted: #6a6961;
+    --border: #e4e1d9; --accent: #2f6f5e; --accent-hover: #245949; --accent-soft: #e5f0ec;
+    --danger: #a33a2b; --danger-soft: #f8e9e6; --ok: #2f6f3e; --ok-soft: #e7f2e9;
+    --pdf: #b4482e; --video: #3b5fa8; --audio: #8a5aa8; --book: #9a7014;
+    --shadow: 0 1px 2px rgba(20, 20, 10, .05), 0 6px 20px rgba(20, 20, 10, .05);
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #161614; --panel: #1f1f1c; --text: #ecebe6; --muted: #9a998f;
-      --border: #33332f; --accent: #5fb89f; --accent-hover: #7cc9b2;
-      --danger: #e0786a; --ok: #7cc98a;
+      --bg: #141412; --panel: #1d1d1a; --soft: #232320; --text: #ecebe6; --muted: #9a998f;
+      --border: #34342f; --accent: #5fb89f; --accent-hover: #7cc9b2; --accent-soft: #1f302b;
+      --danger: #e0786a; --danger-soft: #3a2420; --ok: #7cc98a; --ok-soft: #1f3023;
+      --pdf: #ec8a72; --video: #8aa8e6; --audio: #c79ae0; --book: #dcb35a;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 6px 20px rgba(0, 0, 0, .25);
     }
   }
   * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
   body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  .wrap { max-width: 720px; margin: 0 auto; padding: 32px 16px 48px; }
-  h1 { font-size: 24px; margin: 0 0 4px; }
-  .sub { color: var(--muted); margin: 0 0 24px; }
-  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 28px 16px 56px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .hidden { display: none !important; }
+
+  /* Header */
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 22px; }
+  .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .logo { flex: none; width: 40px; height: 40px; border-radius: 11px; background: var(--accent); color: #fff; display: grid; place-items: center; }
+  .logo svg { width: 22px; height: 22px; }
+  h1 { font-size: 20px; line-height: 1.2; margin: 0; }
+  .tag-line { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+  .drive-pill { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); font-size: 13px; }
+  .drive-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .drive-pill.on .dot { background: var(--ok); }
+  .drive-pill button { padding: 5px 11px; font-size: 12px; border-radius: 999px; }
+  .drive-pill .note { color: var(--muted); }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 4px; padding: 4px; background: var(--border); border-radius: 12px; margin-bottom: 14px; }
+  .tab { flex: 1; border: 0; background: transparent; color: var(--muted); padding: 10px 12px; border-radius: 9px; font: inherit; font-weight: 600; cursor: pointer; }
+  .tab[aria-selected="true"] { background: var(--panel); color: var(--text); box-shadow: 0 1px 3px rgba(0, 0, 0, .12); }
+
+  /* Cards */
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 20px; box-shadow: var(--shadow); }
+  .panel h2 { font-size: 17px; margin: 0 0 4px; }
+  .lede { color: var(--muted); margin: 0 0 16px; font-size: 14px; }
+
+  /* Controls */
   form { display: flex; gap: 10px; flex-wrap: wrap; }
-  input[type="url"] { flex: 1 1 360px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; }
-  button { font: inherit; border-radius: 8px; padding: 12px 18px; cursor: pointer; border: 1px solid var(--accent); }
-  button.primary { background: var(--accent); color: #fff; }
-  button.primary:hover { background: var(--accent-hover); }
+  input[type="url"], input[type="search"], textarea {
+    padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--soft); color: var(--text); font: inherit; min-width: 0;
+  }
+  input[type="url"] { flex: 1 1 280px; }
+  input:focus, textarea:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
+  button { font: inherit; border-radius: 10px; padding: 12px 18px; cursor: pointer; border: 1px solid var(--accent); }
+  button.primary { background: var(--accent); color: #fff; font-weight: 600; }
+  button.primary:hover:not(:disabled) { background: var(--accent-hover); }
   button.ghost { background: transparent; color: var(--text); border-color: var(--border); }
   button.ghost:hover { border-color: var(--accent); }
-  button:disabled { opacity: .5; cursor: not-allowed; }
-  .status { font-size: 14px; min-height: 22px; margin: 12px 2px 0; color: var(--muted); }
-  .status.err { color: var(--danger); }
-  .status.ok { color: var(--ok); }
-  .drive { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); font-size: 14px; }
-  .drive .state { color: var(--muted); }
-  .drive .state b { color: var(--ok); font-weight: 600; }
-  .bar { height: 6px; margin: 14px 2px 0; background: var(--border); border-radius: 3px; overflow: hidden; }
-  .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
-  .section { margin-top: 18px; }
-  .section h2 { font-size: 18px; margin: 0 0 4px; }
-  .section .sub { margin-bottom: 14px; }
-  .cookie { margin-top: 12px; font-size: 13px; color: var(--muted); }
-  .cookie summary { cursor: pointer; }
-  .cookie textarea { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font: 12px/1.4 ui-monospace, Menlo, monospace; }
-  .items { list-style: none; margin: 14px 0 0; padding: 0; }
-  .items li { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--border); }
-  .items .tag { flex: none; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; padding: 2px 7px; border: 1px solid var(--border); border-radius: 6px; color: var(--muted); }
-  .items .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .items button { padding: 7px 12px; font-size: 13px; }
-  .hidden { display: none !important; }
-  footer { color: var(--muted); font-size: 12px; margin-top: 28px; }
+  button:disabled { opacity: .55; cursor: not-allowed; }
+
+  /* Status */
+  .status { display: flex; align-items: flex-start; gap: 10px; margin-top: 14px; padding: 10px 12px; border-radius: 10px; font-size: 14px; background: var(--soft); color: var(--muted); }
+  .status[hidden] { display: none; }
+  .status .spin { display: none; flex: none; width: 15px; height: 15px; margin-top: 3px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+  .status.busy .spin { display: block; }
+  .status.err { background: var(--danger-soft); color: var(--danger); }
+  .status.ok { background: var(--ok-soft); color: var(--ok); }
+  .status .msg { min-width: 0; overflow-wrap: anywhere; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .status .spin { animation-duration: 2.4s; } }
+
+  .bar { height: 6px; margin-top: 10px; background: var(--border); border-radius: 3px; overflow: hidden; }
+  .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .25s; }
+
+  /* Files */
+  details.cookie { margin-top: 12px; font-size: 13px; color: var(--muted); }
+  details.cookie summary { cursor: pointer; }
+  details.cookie p { margin: 8px 0; }
+  details.cookie textarea { width: 100%; font: 12px/1.4 ui-monospace, Menlo, monospace; }
+  .toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 16px; }
+  .toolbar input[type="search"] { flex: 1 1 200px; padding: 9px 12px; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip { padding: 6px 12px; font-size: 13px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--muted); }
+  .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .chip .n { opacity: .75; margin-left: 4px; }
+  .items { list-style: none; margin: 10px 0 0; padding: 0; }
+  .items li { display: flex; align-items: center; gap: 12px; padding: 12px 4px; border-top: 1px solid var(--border); }
+  .items li.active { background: var(--accent-soft); border-radius: 10px; }
+  .badge { flex: none; width: 44px; text-align: center; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 4px 0; border-radius: 7px; color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); }
+  .badge.pdf { --c: var(--pdf); } .badge.video { --c: var(--video); } .badge.audio { --c: var(--audio); } .badge.book { --c: var(--book); }
+  .meta { flex: 1; min-width: 0; }
+  .meta .name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+  .meta .src { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--muted); }
+  .items button { flex: none; padding: 8px 14px; font-size: 13px; }
+  .empty { margin: 18px 0 4px; text-align: center; color: var(--muted); font-size: 14px; }
+
+  footer { color: var(--muted); font-size: 12px; margin-top: 26px; text-align: center; }
+
+  @media (max-width: 520px) {
+    .panel { padding: 16px; }
+    .items li { flex-wrap: wrap; }
+    .items button { width: 100%; }
+    form button { flex: 1 1 100%; }
+  }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>Link to MP3</h1>
-  <p class="sub">Paste a link. The audio is converted and sent straight to your device. Nothing is stored on the server.</p>
-
-  <div class="panel">
-    <form id="form" autocomplete="off">
-      <input type="url" id="url" placeholder="https://" required>
-      <button type="submit" class="primary" id="go">Extract audio</button>
-    </form>
-    <div class="bar hidden" id="bar"><div id="barFill"></div></div>
-    <div class="status" id="status"></div>
-
-    <div class="drive">
-      <div class="state" id="driveState">Google Drive: not connected</div>
+  <header>
+    <div class="brand">
+      <div class="logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/></svg>
+      </div>
       <div>
-        <button class="ghost hidden" id="driveConnect">Connect Google Drive</button>
-        <button class="ghost hidden" id="driveDisconnect">Disconnect</button>
+        <h1>The Extractor</h1>
+        <p class="tag-line">Links to MP3, and books and videos off websites.</p>
       </div>
     </div>
+    <div class="drive-pill" id="drivePill">
+      <span class="dot" aria-hidden="true"></span>
+      <span id="driveState">Drive not connected</span>
+      <button class="ghost hidden" id="driveConnect">Connect</button>
+      <button class="ghost hidden" id="driveDisconnect">Disconnect</button>
+    </div>
+  </header>
+
+  <div class="tabs" role="tablist" aria-label="Tools">
+    <button class="tab" role="tab" id="tabAudio" aria-controls="paneAudio" aria-selected="true">Link to MP3</button>
+    <button class="tab" role="tab" id="tabFiles" aria-controls="paneFiles" aria-selected="false">Find files</button>
   </div>
 
-  <div class="panel section">
+  <section class="panel" id="paneAudio" role="tabpanel" aria-labelledby="tabAudio">
+    <h2>Link to MP3</h2>
+    <p class="lede">Paste a link to a page or an audio file. The audio is converted and sent to your device. Nothing is stored on the server.</p>
+    <form id="form" autocomplete="off">
+      <input type="url" id="url" placeholder="https://" aria-label="Link" required>
+      <button type="submit" class="primary" id="go">Extract audio</button>
+    </form>
+    <div class="status" id="status" role="status" aria-live="polite" hidden><span class="spin"></span><span class="msg"></span></div>
+    <div class="bar hidden" id="bar"><div id="barFill"></div></div>
+  </section>
+
+  <section class="panel hidden" id="paneFiles" role="tabpanel" aria-labelledby="tabFiles">
     <h2>Find books and videos on a website</h2>
-    <p class="sub">Paste a web page. The tool lists the PDFs, e-books, videos and audio files it links to. Pick one and it is saved to your Google Drive, or to your device if Drive is not connected.</p>
+    <p class="lede">Paste a web page. The tool lists the PDFs, e-books, videos and audio files it links to. Pick one and it is saved to your Google Drive, or to your device if Drive is not connected.</p>
     <form id="findForm" autocomplete="off">
-      <input type="url" id="siteUrl" placeholder="https://" required>
+      <input type="url" id="siteUrl" placeholder="https://" aria-label="Web page" required>
       <button type="submit" class="primary" id="findBtn">Find files</button>
     </form>
     <details class="cookie">
       <summary>Site needs a login? (advanced)</summary>
       <p>Paste the <code>Cookie</code> request header from your browser while logged in (developer tools, Network tab). It is used for this request only, sent only to that site, and never stored or logged. Only use content you are allowed to download.</p>
-      <textarea id="cookie" rows="2" placeholder="name=value; name2=value2"></textarea>
+      <textarea id="cookie" rows="2" placeholder="name=value; name2=value2" aria-label="Cookie header"></textarea>
     </details>
-    <div class="status" id="findStatus"></div>
+    <div class="status" id="findStatus" role="status" aria-live="polite" hidden><span class="spin"></span><span class="msg"></span></div>
     <div class="bar hidden" id="saveBar"><div id="saveBarFill"></div></div>
+
+    <div class="toolbar hidden" id="toolbar">
+      <input type="search" id="filterText" placeholder="Filter by name" aria-label="Filter files by name">
+      <div class="chips" id="chips" role="group" aria-label="Filter by type"></div>
+    </div>
     <ul class="items" id="items"></ul>
-  </div>
+    <p class="empty hidden" id="empty">No files match.</p>
+  </section>
 
   <footer>Only process content you have the right to use.</footer>
 </div>
@@ -99,53 +176,20 @@
 <script>
 (() => {
   const $ = (s) => document.querySelector(s);
-  const statusEl = $('#status');
 
-  function setStatus(text, cls) {
-    statusEl.className = 'status' + (cls ? ' ' + cls : '');
-    statusEl.textContent = text;
+  // A status line with a spinner while it is working (no style given) and a tint for done or failed.
+  function statusLine(el) {
+    return (text, cls) => {
+      el.hidden = !text;
+      el.className = 'status' + (cls ? ' ' + cls : (text ? ' busy' : ''));
+      el.querySelector('.msg').textContent = text || '';
+    };
   }
+  const setStatus = statusLine($('#status'));
+  const setFind = statusLine($('#findStatus'));
 
   function fmtMB(bytes) { return (bytes / 1024 / 1024).toFixed(1) + ' MB'; }
 
-  // ---------- Google Drive state ----------
-  async function loadMe() {
-    try {
-      const me = await (await fetch('/api/me')).json();
-      renderDrive(me);
-    } catch (_) {}
-  }
-
-  let driveOn = false;
-
-  function renderDrive(me) {
-    driveOn = !!me.drive;
-    document.querySelectorAll('.items .save').forEach((b) => { b.textContent = driveOn ? 'Save to Drive' : 'Download'; });
-    const state = $('#driveState');
-    const connect = $('#driveConnect');
-    const disconnect = $('#driveDisconnect');
-    if (me.drive) {
-      state.innerHTML = '';
-      const b = document.createElement('b');
-      b.textContent = 'Connected';
-      state.append('Google Drive: ', b, ' · each extraction is also saved to Drive');
-      connect.classList.add('hidden');
-      disconnect.classList.remove('hidden');
-    } else {
-      state.textContent = 'Google Drive: not connected';
-      disconnect.classList.add('hidden');
-      connect.classList.toggle('hidden', !me.driveConfigured);
-      if (!me.driveConfigured) state.textContent += ' (not configured on the server)';
-    }
-  }
-
-  $('#driveConnect').addEventListener('click', () => { location.href = '/auth/google'; });
-  $('#driveDisconnect').addEventListener('click', async () => {
-    await fetch('/auth/google/disconnect', { method: 'POST' });
-    loadMe();
-  });
-
-  // ---------- Extract and save to device ----------
   function filenameFrom(disposition) {
     if (!disposition) return 'audio.mp3';
     const star = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
@@ -154,6 +198,57 @@
     return plain ? plain[1] : 'audio.mp3';
   }
 
+  function saveBlob(blob, name) {
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = objectUrl;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 60 * 1000);
+  }
+
+  // ---------- Tabs ----------
+  function showTab(name) {
+    const audio = name !== 'files';
+    $('#tabAudio').setAttribute('aria-selected', String(audio));
+    $('#tabFiles').setAttribute('aria-selected', String(!audio));
+    $('#paneAudio').classList.toggle('hidden', !audio);
+    $('#paneFiles').classList.toggle('hidden', audio);
+    try { localStorage.setItem('tab', audio ? 'audio' : 'files'); } catch (_) {}
+  }
+  $('#tabAudio').addEventListener('click', () => showTab('audio'));
+  $('#tabFiles').addEventListener('click', () => showTab('files'));
+  try { showTab(localStorage.getItem('tab') || 'audio'); } catch (_) {}
+
+  // ---------- Google Drive state ----------
+  let driveOn = false;
+
+  async function loadMe() {
+    try {
+      renderDrive(await (await fetch('/api/me')).json());
+    } catch (_) {}
+  }
+
+  function renderDrive(me) {
+    driveOn = !!me.drive;
+    document.querySelectorAll('.items .save').forEach((b) => { b.textContent = driveOn ? 'Save to Drive' : 'Download'; });
+    $('#drivePill').classList.toggle('on', driveOn);
+    $('#driveConnect').classList.toggle('hidden', driveOn || !me.driveConfigured);
+    $('#driveDisconnect').classList.toggle('hidden', !driveOn);
+    $('#driveState').textContent = driveOn
+      ? 'Drive connected'
+      : (me.driveConfigured ? 'Drive not connected' : 'Drive not set up');
+  }
+
+  $('#driveConnect').addEventListener('click', () => { location.href = '/auth/google'; });
+  $('#driveDisconnect').addEventListener('click', async () => {
+    await fetch('/auth/google/disconnect', { method: 'POST' });
+    loadMe();
+  });
+
+  // ---------- Link to MP3 ----------
   $('#form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const url = $('#url').value.trim();
@@ -201,17 +296,8 @@
       }
       barFill.style.width = '100%';
 
-      const blob = new Blob(chunks, { type: 'audio/mpeg' });
       const name = filenameFrom(res.headers.get('Content-Disposition'));
-      const objectUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = objectUrl;
-      a.download = name;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(objectUrl), 60 * 1000);
-
+      saveBlob(new Blob(chunks, { type: 'audio/mpeg' }), name);
       setStatus(`Saved to your device: ${name} (${fmtMB(received)}) in ${secs()}`, 'ok');
       $('#url').value = '';
     } catch (err) {
@@ -223,38 +309,74 @@
   });
 
   // ---------- Find books and videos on a website ----------
-  const findStatus = $('#findStatus');
   const saveBar = $('#saveBar');
   const saveBarFill = $('#saveBarFill');
+  const KIND = { pdf: 'PDF', book: 'Book', video: 'Video', audio: 'Audio' };
+  const KIND_ORDER = ['pdf', 'book', 'video', 'audio'];
   let pageUrl = '';
   let busy = false;
+  let allItems = [];
+  let filterKind = 'all';
+  let filterText = '';
 
-  function setFind(text, cls) {
-    findStatus.className = 'status' + (cls ? ' ' + cls : '');
-    findStatus.textContent = text;
+  function hostOf(u) { try { return new URL(u).host; } catch (_) { return ''; } }
+
+  function renderChips() {
+    const box = $('#chips');
+    box.textContent = '';
+    const counts = {};
+    allItems.forEach((i) => { counts[i.kind] = (counts[i.kind] || 0) + 1; });
+    const kinds = ['all', ...KIND_ORDER.filter((k) => counts[k])];
+    for (const k of kinds) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chip';
+      b.setAttribute('aria-pressed', String(filterKind === k));
+      b.append(k === 'all' ? 'All' : KIND[k]);
+      const n = document.createElement('span');
+      n.className = 'n';
+      n.textContent = k === 'all' ? allItems.length : counts[k];
+      b.append(n);
+      b.addEventListener('click', () => { filterKind = k; renderChips(); renderItems(); });
+      box.append(b);
+    }
   }
 
-  const KIND = { pdf: 'PDF', book: 'Book', video: 'Video', audio: 'Audio' };
-
-  function renderItems(items) {
+  function renderItems() {
     const list = $('#items');
     list.textContent = '';
-    for (const it of items) {
+    const q = filterText.toLowerCase();
+    const shown = allItems.filter((i) => (filterKind === 'all' || i.kind === filterKind) && (!q || i.title.toLowerCase().includes(q)));
+    $('#empty').classList.toggle('hidden', shown.length > 0 || allItems.length === 0);
+    for (const it of shown) {
       const li = document.createElement('li');
-      const tag = document.createElement('span');
-      tag.className = 'tag';
-      tag.textContent = KIND[it.kind] || it.kind;
+      const badge = document.createElement('span');
+      badge.className = 'badge ' + it.kind;
+      badge.textContent = KIND[it.kind] || it.kind;
+      const meta = document.createElement('div');
+      meta.className = 'meta';
       const name = document.createElement('span');
       name.className = 'name';
       name.textContent = it.title;
-      name.title = it.url;
+      name.title = it.title;
+      const src = document.createElement('span');
+      src.className = 'src';
+      src.textContent = `${hostOf(it.url)} · .${it.ext}`;
+      meta.append(name, src);
       const btn = document.createElement('button');
       btn.className = 'primary save';
       btn.textContent = driveOn ? 'Save to Drive' : 'Download';
-      btn.addEventListener('click', () => saveItem(it, btn));
-      li.append(tag, name, btn);
+      btn.addEventListener('click', () => saveItem(it, btn, li));
+      li.append(badge, meta, btn);
       list.append(li);
     }
+  }
+
+  $('#filterText').addEventListener('input', (e) => { filterText = e.target.value.trim(); renderItems(); });
+
+  function setBusyUi(on) {
+    $('#findBtn').disabled = on;
+    document.querySelectorAll('.items .save').forEach((b) => { b.disabled = on; });
   }
 
   $('#findForm').addEventListener('submit', async (e) => {
@@ -263,8 +385,14 @@
     const url = $('#siteUrl').value.trim();
     if (!url) return;
     busy = true;
-    $('#findBtn').disabled = true;
+    setBusyUi(true);
+    allItems = [];
+    filterKind = 'all';
+    filterText = '';
+    $('#filterText').value = '';
+    $('#toolbar').classList.add('hidden');
     $('#items').textContent = '';
+    $('#empty').classList.add('hidden');
     saveBar.classList.add('hidden');
     setFind('Looking at the page…');
     try {
@@ -276,20 +404,24 @@
       const data = await res.json();
       if (!res.ok) { setFind(data.error || 'Could not read that page.', 'err'); return; }
       pageUrl = url;
-      renderItems(data.items);
-      setFind(`${data.items.length} file${data.items.length === 1 ? '' : 's'} found${data.title ? ' on “' + data.title + '”' : ''}.`, 'ok');
+      allItems = data.items;
+      $('#toolbar').classList.toggle('hidden', allItems.length < 2);
+      renderChips();
+      renderItems();
+      setFind(`${allItems.length} file${allItems.length === 1 ? '' : 's'} found${data.title ? ' on “' + data.title + '”' : ''}.`, 'ok');
     } catch (_) {
       setFind('Could not reach the server.', 'err');
     } finally {
       busy = false;
-      $('#findBtn').disabled = false;
+      setBusyUi(false);
     }
   });
 
-  async function saveItem(it, btn) {
+  async function saveItem(it, btn, row) {
     if (busy) return;
     busy = true;
-    btn.disabled = true;
+    setBusyUi(true);
+    row.classList.add('active');
     saveBar.classList.add('hidden');
     saveBarFill.style.width = '0%';
     const t0 = Date.now();
@@ -328,9 +460,10 @@
             const msg = JSON.parse(line);
             if (msg.progress !== undefined) {
               if (msg.total) {
+                const pct = Math.min(99, Math.floor((msg.progress / msg.total) * 100));
                 saveBar.classList.remove('hidden');
-                saveBarFill.style.width = Math.min(99, Math.floor((msg.progress / msg.total) * 100)) + '%';
-                setFind(`Saving to Drive… ${Math.min(99, Math.floor((msg.progress / msg.total) * 100))}% (${fmtMB(msg.progress)}) · ${secs()}`);
+                saveBarFill.style.width = pct + '%';
+                setFind(`Saving to Drive… ${pct}% (${fmtMB(msg.progress)}) · ${secs()}`);
               } else {
                 setFind(`Saving to Drive… ${fmtMB(msg.progress)} · ${secs()}`);
               }
@@ -369,20 +502,14 @@
       }
       saveBarFill.style.width = '100%';
       const name = filenameFrom(res.headers.get('Content-Disposition'));
-      const objectUrl = URL.createObjectURL(new Blob(chunks, { type }));
-      const a = document.createElement('a');
-      a.href = objectUrl;
-      a.download = name;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(objectUrl), 60 * 1000);
+      saveBlob(new Blob(chunks, { type }), name);
       setFind(`Saved to your device: ${name} (${fmtMB(received)}) in ${secs()}`, 'ok');
     } catch (_) {
       setFind('Could not reach the server, or the download was interrupted.', 'err');
     } finally {
       busy = false;
-      btn.disabled = false;
+      row.classList.remove('active');
+      setBusyUi(false);
     }
   }
 
