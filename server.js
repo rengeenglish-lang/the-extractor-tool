@@ -95,7 +95,8 @@ function getDirectUrl(url) {
       clearTimeout(timer);
       if (code !== 0) return resolve({ ok: false, error: lastErrorLine(err, 'No audio could be found at this link.') });
       try {
-        const info = JSON.parse(out);
+        // Pages with several audio files print one JSON object per line; take the first.
+        const info = JSON.parse(out.split('\n').find((l) => l.trim()) || '');
         const fmt = (info.requested_formats && info.requested_formats[0]) || info;
         if (!fmt.url) throw new Error('no url');
         resolve({
@@ -125,10 +126,63 @@ function guessDirectAudio(url) {
   return { ok: true, url, headers: {}, title: base.replace(AUDIO_EXT, '') || null, isMp3: m[1].toLowerCase() === 'mp3', guessed: true };
 }
 
-// File size of a direct link, for the progress percentage. null when unknown.
-async function headSize(url) {
+const BROWSER_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+const AUDIO_IN_HTML = /(?:src|href|content)\s*=\s*["']([^"']+?\.(?:mp3|m4a|aac|ogg|opus|wav)(?:\?[^"']*)?)["']/gi;
+
+// Fast path for pages: load the HTML ourselves and look for the audio file. Used only when the page
+// names exactly one audio file; anything else (blocked, scripted, several files) returns null and
+// yt-dlp decides.
+async function scrapePage(url) {
   try {
-    const r = await fetch(url, { method: 'HEAD', redirect: 'follow', signal: AbortSignal.timeout(3000) });
+    const r = await fetch(url, {
+      headers: { 'User-Agent': BROWSER_UA, Accept: 'text/html,application/xhtml+xml,*/*;q=0.8' },
+      redirect: 'follow',
+      signal: AbortSignal.timeout(6000)
+    });
+    if (!r.ok || !/html/i.test(r.headers.get('content-type') || '')) return null;
+    const html = (await r.text()).slice(0, 2 * 1024 * 1024);
+
+    const found = new Set();
+    for (const m of html.matchAll(AUDIO_IN_HTML)) {
+      try { found.add(new URL(m[1].replace(/&amp;/g, '&'), r.url).href); } catch (_) {}
+    }
+    if (found.size !== 1) return null;
+
+    const audioUrl = [...found][0];
+    const t = /<title[^>]*>([^<]*)<\/title>/i.exec(html);
+    const title = t ? t[1].replace(/&amp;/g, '&').replace(/&#0?39;|&apos;/g, "'").replace(/&quot;/g, '"').trim() : null;
+    const ext = /\.(\w+)$/.exec(new URL(audioUrl).pathname);
+    return {
+      ok: true,
+      url: audioUrl,
+      headers: { 'User-Agent': BROWSER_UA, Referer: r.url },
+      title: title || null,
+      isMp3: !!ext && ext[1].toLowerCase() === 'mp3',
+      guessed: true
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+// Recently resolved links, so the same link again skips the lookup. Memory only.
+const SOURCE_CACHE_MS = 5 * 60 * 1000;
+const sourceCache = new Map();
+function cachedSource(url) {
+  const hit = sourceCache.get(url);
+  if (hit && Date.now() - hit.at < SOURCE_CACHE_MS) return hit.direct;
+  sourceCache.delete(url);
+  return null;
+}
+function rememberSource(url, direct) {
+  if (sourceCache.size >= 200) sourceCache.delete(sourceCache.keys().next().value);
+  sourceCache.set(url, { at: Date.now(), direct });
+}
+
+// File size of a direct link, for the progress percentage. null when unknown.
+async function headSize(url, headers = {}) {
+  try {
+    const r = await fetch(url, { method: 'HEAD', headers, redirect: 'follow', signal: AbortSignal.timeout(3000) });
     const n = Number(r.headers.get('content-length'));
     return r.ok && n > 0 ? n : null;
   } catch (_) {
@@ -280,6 +334,7 @@ app.get('/api/extract', async (req, res) => {
       if (code !== 0 && !sawAudio && direct.guessed && !res.destroyed) {
         const found = await getDirectUrl(url);
         if (!found.ok) return fail(found.error);
+        rememberSource(url, found);
         return launch(found);
       }
 
@@ -301,10 +356,26 @@ app.get('/api/extract', async (req, res) => {
       return;
     }
 
+    // Same link a moment ago: reuse the result. If it no longer works, launch() retries with yt-dlp.
+    const cached = cachedSource(url);
+    if (cached) {
+      launch({ ...cached, guessed: true });
+      return;
+    }
+
+    const scraped = await scrapePage(url);
+    if (scraped) {
+      rememberSource(url, scraped);
+      headSize(scraped.url, scraped.headers).then((n) => { scraped.size = n; expectedSize = n; sizeReady = true; tryStart(); });
+      launch({ ...scraped, sizePending: true });
+      return;
+    }
+
     const direct = await getDirectUrl(url);
     titleName = sanitizeFilename(direct.title || 'audio');
     haveTitle = true;
     if (!direct.ok) return fail(direct.error);
+    rememberSource(url, direct);
     launch(direct);
   } catch (err) {
     clearTimeout(timeout);
