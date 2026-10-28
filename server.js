@@ -103,13 +103,37 @@ function getDirectUrl(url) {
           url: fmt.url,
           headers: fmt.http_headers || {},
           title: info.title || null,
-          isMp3: fmt.acodec === 'mp3' || fmt.ext === 'mp3'
+          isMp3: fmt.acodec === 'mp3' || fmt.ext === 'mp3',
+          size: fmt.filesize || fmt.filesize_approx || null
         });
       } catch (_) {
         resolve({ ok: false, error: 'Could not read the audio stream for this link.' });
       }
     });
   });
+}
+
+const AUDIO_EXT = /\.(mp3|m4a|aac|ogg|oga|opus|wav|flac|wma)$/i;
+
+// A link that already points at an audio file needs no yt-dlp lookup. Returns null for anything else.
+function guessDirectAudio(url) {
+  const u = new URL(url);
+  const m = AUDIO_EXT.exec(u.pathname);
+  if (!m) return null;
+  let base = u.pathname.split('/').pop();
+  try { base = decodeURIComponent(base); } catch (_) {}
+  return { ok: true, url, headers: {}, title: base.replace(AUDIO_EXT, '') || null, isMp3: m[1].toLowerCase() === 'mp3', guessed: true };
+}
+
+// File size of a direct link, for the progress percentage. null when unknown.
+async function headSize(url) {
+  try {
+    const r = await fetch(url, { method: 'HEAD', redirect: 'follow', signal: AbortSignal.timeout(3000) });
+    const n = Number(r.headers.get('content-length'));
+    return r.ok && n > 0 ? n : null;
+  } catch (_) {
+    return null;
+  }
 }
 
 // Optional Google Drive copy. The same bytes stream to Drive during the download.
@@ -149,6 +173,8 @@ app.get('/api/extract', async (req, res) => {
   let started = false;      // response headers sent, audio streaming
   let haveTitle = false;
   let titleName = null;
+  let expectedSize = null;  // bytes, when known, so the page can show a percentage
+  let sizeReady = true;     // false while a HEAD request for the size is still pending
   let ffmpegDone = false;
   let ffmpegCode = null;
   let sawAudio = false;
@@ -174,10 +200,11 @@ app.get('/api/extract', async (req, res) => {
   }
 
   function tryStart() {
-    if (started || !haveTitle || !sawAudio) return;
+    if (started || !haveTitle || !sawAudio || !sizeReady) return;
     started = true;
     res.writeHead(200, {
       'Content-Type': 'audio/mpeg',
+      ...(expectedSize ? { 'X-Expected-Size': String(expectedSize) } : {}),
       'Content-Disposition': `attachment; filename="${titleName.replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(titleName)}`,
       'Cache-Control': 'no-store'
     });
@@ -204,17 +231,18 @@ app.get('/api/extract', async (req, res) => {
     finish();
   }
 
-  try {
-    const direct = await getDirectUrl(url);
+  function fail(message) {
+    clearTimeout(timeout);
+    if (!res.headersSent) res.status(502).json({ error: message });
+    finish();
+  }
+
+  function launch(direct) {
     titleName = sanitizeFilename(direct.title || 'audio');
     haveTitle = true;
-
-    if (!direct.ok) {
-      clearTimeout(timeout);
-      if (!res.headersSent) res.status(502).json({ error: direct.error });
-      finish();
-      return;
-    }
+    expectedSize = direct.size || null;
+    sizeReady = !direct.sizePending;
+    errText = '';
 
     // Pass the site's own request headers (user agent, referer, etc.) so ffmpeg can read the stream.
     const headerText = Object.entries(direct.headers || {}).map(([k, v]) => `${k}: ${v}\r\n`).join('');
@@ -222,16 +250,20 @@ app.get('/api/extract', async (req, res) => {
 
     ffmpeg = spawn(FFMPEG, [
       '-hide_banner', '-loglevel', 'error',
+      // Reconnect on dropped connections; read less before the first byte goes out for MP3 copies.
+      '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5',
+      ...(direct.isMp3 ? ['-probesize', '256k', '-analyzeduration', '500000'] : []),
       ...headerArgs,
       '-i', direct.url, '-vn',
       // Already MP3: copy the stream as is. Anything else is encoded.
       ...(direct.isMp3 ? ['-codec:a', 'copy'] : ['-codec:a', 'libmp3lame', '-q:a', '4']),
       '-f', 'mp3', 'pipe:1'
     ]);
+    const proc = ffmpeg;
 
-    ffmpeg.stderr.on('data', (d) => { errText = (errText + d).slice(-2000); });
+    proc.stderr.on('data', (d) => { errText = (errText + d).slice(-2000); });
 
-    ffmpeg.stdout.on('data', (chunk) => {
+    proc.stdout.on('data', (chunk) => {
       sawAudio = true;
       if (!started) {
         queue.push(chunk);
@@ -241,15 +273,39 @@ app.get('/api/extract', async (req, res) => {
       writeChunk(chunk);
     });
 
-    ffmpeg.on('close', (code) => {
+    proc.on('close', async (code) => {
+      if (code !== 0) console.error('Extraction failed:', lastErrorLine(errText, `exit ${code}`));
+
+      // A link that looked like an audio file but could not be read: ask yt-dlp instead.
+      if (code !== 0 && !sawAudio && direct.guessed && !res.destroyed) {
+        const found = await getDirectUrl(url);
+        if (!found.ok) return fail(found.error);
+        return launch(found);
+      }
+
       clearTimeout(timeout);
       ffmpegDone = true;
       ffmpegCode = code;
-      if (code !== 0) console.error('Extraction failed:', lastErrorLine(errText, `exit ${code}`));
       finalize();
     });
 
     tryStart();
+  }
+
+  try {
+    // A link that already points at an audio file skips the yt-dlp lookup.
+    const guess = guessDirectAudio(url);
+    if (guess) {
+      headSize(url).then((n) => { expectedSize = n; sizeReady = true; tryStart(); });
+      launch({ ...guess, sizePending: true });
+      return;
+    }
+
+    const direct = await getDirectUrl(url);
+    titleName = sanitizeFilename(direct.title || 'audio');
+    haveTitle = true;
+    if (!direct.ok) return fail(direct.error);
+    launch(direct);
   } catch (err) {
     clearTimeout(timeout);
     killAll();

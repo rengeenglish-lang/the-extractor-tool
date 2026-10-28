@@ -37,6 +37,8 @@
   .drive { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); font-size: 14px; }
   .drive .state { color: var(--muted); }
   .drive .state b { color: var(--ok); font-weight: 600; }
+  .bar { height: 6px; margin: 14px 2px 0; background: var(--border); border-radius: 3px; overflow: hidden; }
+  .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
   .hidden { display: none !important; }
   footer { color: var(--muted); font-size: 12px; margin-top: 28px; }
 </style>
@@ -51,6 +53,7 @@
       <input type="url" id="url" placeholder="https://" required>
       <button type="submit" class="primary" id="go">Extract audio</button>
     </form>
+    <div class="bar hidden" id="bar"><div id="barFill"></div></div>
     <div class="status" id="status"></div>
 
     <div class="drive">
@@ -126,10 +129,18 @@
 
     const btn = $('#go');
     btn.disabled = true;
-    setStatus('Extracting audio…');
+    const t0 = Date.now();
+    const secs = () => Math.round((Date.now() - t0) / 1000) + 's';
+    const bar = $('#bar');
+    const barFill = $('#barFill');
+    bar.classList.add('hidden');
+    barFill.style.width = '0%';
+    setStatus('Finding the audio…');
+    const wait = setInterval(() => setStatus(`Finding the audio… ${secs()}`), 1000);
 
     try {
       const res = await fetch('/api/extract?url=' + encodeURIComponent(url));
+      clearInterval(wait);
       if (!res.ok) {
         let msg = 'Extraction failed.';
         try { msg = (await res.json()).error || msg; } catch (_) {}
@@ -141,13 +152,22 @@
       const reader = res.body.getReader();
       const chunks = [];
       let received = 0;
+      const expected = Number(res.headers.get('X-Expected-Size')) || 0;
+      if (expected) bar.classList.remove('hidden');
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         chunks.push(value);
         received += value.length;
-        setStatus(`Downloading… ${fmtMB(received)}`);
+        if (expected) {
+          const pct = Math.min(99, Math.floor((received / expected) * 100));
+          barFill.style.width = pct + '%';
+          setStatus(`Downloading… ${pct}% (${fmtMB(received)}) · ${secs()}`);
+        } else {
+          setStatus(`Downloading… ${fmtMB(received)} · ${secs()}`);
+        }
       }
+      barFill.style.width = '100%';
 
       const blob = new Blob(chunks, { type: 'audio/mpeg' });
       const name = filenameFrom(res.headers.get('Content-Disposition'));
@@ -160,11 +180,12 @@
       a.remove();
       setTimeout(() => URL.revokeObjectURL(objectUrl), 60 * 1000);
 
-      setStatus(`Saved to your device: ${name} (${fmtMB(received)})`, 'ok');
+      setStatus(`Saved to your device: ${name} (${fmtMB(received)}) in ${secs()}`, 'ok');
       $('#url').value = '';
     } catch (err) {
       setStatus('Could not reach the server, or the download was interrupted.', 'err');
     } finally {
+      clearInterval(wait);
       btn.disabled = false;
     }
   });
