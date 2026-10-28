@@ -65,11 +65,11 @@ function cookieFor(target, pageUrl, cookie) {
 }
 
 // fetch that follows redirects by hand so every hop is checked and gets the right cookie.
-async function safeFetch(url, { pageUrl, cookie, method = 'GET', timeoutMs = 15000, signal } = {}) {
+async function safeFetch(url, { pageUrl, cookie, method = 'GET', timeoutMs = 15000, signal, ua } = {}) {
   let current = url;
   for (let hop = 0; hop < 6; hop++) {
     if (!isPublicHttpUrl(current)) throw new Error('That address is not allowed.');
-    const headers = { 'User-Agent': BROWSER_UA, Accept: '*/*' };
+    const headers = { 'User-Agent': ua || BROWSER_UA, Accept: '*/*' };
     const c = cookieFor(current, pageUrl || url, cookie);
     if (c) headers.Cookie = c;
     if (pageUrl && pageUrl !== current) headers.Referer = pageUrl;
@@ -197,8 +197,217 @@ function lastLine(text, fallback) {
   return (lines[lines.length - 1] || fallback).replace(/^ERROR:\s*/, '');
 }
 
+// ---------- Scanning a whole site ----------
+// A polite crawler: it says who it is, reads robots.txt (rules and Crawl-delay), starts from the
+// sitemap, stays on the one site, and stops at a page, depth and time limit.
+const BOT_UA = 'TheExtractorBot/1.0 (personal file finder; obeys robots.txt)';
+const MAX_CRAWL_PAGES = Number(process.env.MAX_CRAWL_PAGES || 60);
+const MAX_CRAWL_MS = Number(process.env.MAX_CRAWL_MS || 75 * 1000);
+const MAX_CRAWL_DEPTH = 3;
+const MAX_CRAWL_ITEMS = 500;
+const SKIP_EXT = /\.(?:jpe?g|png|gif|webp|svg|ico|css|js|json|xml|zip|rar|7z|gz|exe|dmg|apk|woff2?|ttf|eot|docx?|xlsx?|pptx?|csv|txt)$/i;
+const SKIP_PATH = /\/(?:feed|wp-json|wp-admin|wp-login\.php|cart|checkout|login|logout|signin|signup|search)(?:\/|$)/i;
+// Pages whose address suggests they hold files are visited first.
+const LIKELY_WORDS = /pdf|e-?book|kitap|book|librar|kutuphane|download|indir|video|ders|soru|cikmis|material|resource|course|lesson|test|exam|archive|arsiv/i;
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function patternToRegex(p) {
+  const esc = p.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\\\$$/, '$');
+  return new RegExp('^' + esc);
+}
+
+function parseRobots(text) {
+  const groups = [];
+  const sitemaps = [];
+  let cur = null;
+  let lastWasAgent = false;
+  for (const raw of String(text).split(/\r?\n/)) {
+    const m = /^([a-z-]+)\s*:\s*(.*)$/i.exec(raw.replace(/#.*/, '').trim());
+    if (!m) continue;
+    const key = m[1].toLowerCase();
+    const val = m[2].trim();
+    if (key === 'sitemap') { sitemaps.push(val); continue; }
+    if (key === 'user-agent') {
+      if (!cur || !lastWasAgent) { cur = { agents: [], rules: [], delay: null }; groups.push(cur); }
+      cur.agents.push(val.toLowerCase());
+      lastWasAgent = true;
+      continue;
+    }
+    lastWasAgent = false;
+    if (!cur) continue;
+    if ((key === 'disallow' || key === 'allow') && val) cur.rules.push({ allow: key === 'allow', re: patternToRegex(val), len: val.length });
+    else if (key === 'crawl-delay') cur.delay = Number(val) || null;
+  }
+  const mine = groups.filter((g) => g.agents.includes('theextractorbot'));
+  const use = mine.length ? mine : groups.filter((g) => g.agents.includes('*'));
+  const rules = use.flatMap((g) => g.rules);
+  const delay = use.map((g) => g.delay).find((d) => d != null) || 0;
+  return {
+    sitemaps,
+    delay,
+    allowed(path) {
+      let best = null;
+      for (const r of rules) {
+        if (r.re.test(path) && (!best || r.len > best.len || (r.len === best.len && r.allow))) best = r;
+      }
+      return !best || best.allow;
+    }
+  };
+}
+
+function itemFromUrl(abs, cls) {
+  return { url: abs, kind: cls.kind, via: cls.via || 'direct', ext: cls.ext, title: nameFromUrl(abs) || 'Untitled' };
+}
+
+async function crawlSite(startUrl, { cookie, signal, emit }) {
+  const start = new URL(startUrl);
+  const rootKey = (h) => h.replace(/^www\./i, '').toLowerCase();
+  const root = rootKey(start.hostname);
+  const deadline = Date.now() + MAX_CRAWL_MS;
+  const fetchOpts = { pageUrl: start.href, cookie, signal, ua: BOT_UA, timeoutMs: 8000 };
+
+  let robots = { sitemaps: [], delay: 0, allowed: () => true };
+  try {
+    const { res: r } = await safeFetch(start.origin + '/robots.txt', fetchOpts);
+    if (r.ok) robots = parseRobots((await r.text()).slice(0, 200000));
+  } catch (_) {}
+
+  const seen = new Set();
+  const queue = [];
+  const found = new Map();
+  let pages = 0;
+  let failed = 0;
+  let active = 0;
+  let firstRefusal = null;
+
+  function enqueue(raw, base, depth) {
+    let u;
+    try { u = new URL(raw, base); } catch (_) { return; }
+    if (!/^https?:$/.test(u.protocol) || rootKey(u.hostname) !== root) return;
+    u.hash = '';
+    if (SKIP_EXT.test(u.pathname) || SKIP_PATH.test(u.pathname) || u.search.length > 60 || classify(u.href)) return;
+    const key = u.origin + u.pathname + u.search;
+    if (seen.has(key) || seen.size >= 3000) return;
+    if (!robots.allowed(u.pathname + u.search)) return;
+    seen.add(key);
+    let decoded = u.pathname;
+    try { decoded = decodeURIComponent(u.pathname); } catch (_) {}
+    queue.push({ url: u.href, depth, rank: depth * 10 - (LIKELY_WORDS.test(decoded) ? 6 : 0) });
+  }
+
+  function addItem(item, page) {
+    if (found.has(item.url) || found.size >= MAX_CRAWL_ITEMS) return null;
+    const it = { ...item, page };
+    found.set(item.url, it);
+    return it;
+  }
+
+  // Sitemaps first: they list pages and often the files themselves.
+  const fresh = [];
+  const sitemapQueue = robots.sitemaps.length ? [...robots.sitemaps] : [start.origin + '/sitemap.xml'];
+  for (let budget = 8; sitemapQueue.length && budget > 0 && !signal.aborted && Date.now() < deadline; budget--) {
+    const sm = sitemapQueue.shift();
+    try {
+      const { res: r, finalUrl } = await safeFetch(sm, fetchOpts);
+      if (!r.ok) continue;
+      const xml = (await r.text()).slice(0, 4 * 1024 * 1024);
+      for (const m of xml.matchAll(/<loc>\s*(?:<!\[CDATA\[)?\s*([^<\]\s]+)\s*(?:\]\]>)?\s*<\/loc>/gi)) {
+        const loc = decodeEntities(m[1]);
+        if (/\.xml$/i.test(loc)) { if (sitemapQueue.length < 6) sitemapQueue.push(loc); continue; }
+        const cls = classify(loc);
+        if (cls) { const it = addItem(itemFromUrl(loc, cls), sm); if (it) fresh.push(it); }
+        else enqueue(loc, finalUrl, 1);
+      }
+    } catch (_) {}
+  }
+  enqueue(start.href, start.href, 0);
+  enqueue(start.origin + '/', start.href, 0);
+  if (fresh.length) emit({ items: fresh });
+
+  const delayMs = Math.min(Math.max(robots.delay * 1000, 150), 5000);
+
+  async function worker() {
+    while (!signal.aborted && Date.now() < deadline && pages + active < MAX_CRAWL_PAGES) {
+      if (!queue.length) {
+        if (active === 0) return;
+        await sleep(80);
+        continue;
+      }
+      queue.sort((a, b) => a.rank - b.rank);
+      const job = queue.shift();
+      active++;
+      try {
+        const { res: r, finalUrl } = await safeFetch(job.url, fetchOpts);
+        let finalHost = '';
+        try { finalHost = rootKey(new URL(finalUrl).hostname); } catch (_) {}
+        if (!r.ok) {
+          failed++;
+          if (!pages && !firstRefusal) firstRefusal = { url: job.url, status: r.status };
+        } else if (finalHost === root && /html/i.test(r.headers.get('content-type') || '')) {
+          const html = (await r.text()).slice(0, 1.5 * 1024 * 1024);
+          const items = [];
+          for (const item of findMaterials(html, finalUrl)) { const it = addItem(item, finalUrl); if (it) items.push(it); }
+          if (job.depth < MAX_CRAWL_DEPTH) {
+            let n = 0;
+            for (const m of html.matchAll(/<a\b[^>]*?\bhref\s*=\s*(["'])(.*?)\1/gi)) {
+              enqueue(decodeEntities(m[2]), finalUrl, job.depth + 1);
+              if (++n >= 300) break;
+            }
+          }
+          pages++;
+          if (items.length) emit({ items });
+          emit({ progress: { pages, queued: queue.length, files: found.size, url: finalUrl } });
+        } else {
+          if (r.body) r.body.cancel().catch(() => {});
+        }
+      } catch (e) {
+        if (signal.aborted) return;
+        failed++;
+      } finally {
+        active--;
+      }
+      await sleep(delayMs);
+    }
+  }
+
+  await Promise.all(Array.from({ length: robots.delay > 0 ? 1 : 3 }, worker));
+
+  if (!pages && !found.size && firstRefusal) {
+    emit({ error: siteRefused('scan', firstRefusal.url, firstRefusal.status) });
+    return;
+  }
+  const reason = signal.aborted ? 'stopped' : Date.now() >= deadline ? 'time' : pages >= MAX_CRAWL_PAGES ? 'pages' : 'finished';
+  console.log(`[materials] scan host=${start.host} pages=${pages} files=${found.size} failed=${failed} reason=${reason}`);
+  emit({ done: true, pages, files: found.size, reason });
+}
+
 function register(app, deps) {
   const { acquire, release, oauthClient, YTDLP } = deps;
+
+  app.post('/api/materials/crawl', async (req, res) => {
+    const pageUrl = String((req.body && req.body.url) || '').trim();
+    const cookie = String((req.body && req.body.cookie) || '').trim() || undefined;
+    if (!isPublicHttpUrl(pageUrl)) return res.status(400).json({ error: 'Enter a valid public http(s) address.' });
+
+    await acquire();
+    let released = false;
+    const finish = () => { if (!released) { released = true; release(); } };
+    const abort = new AbortController();
+    res.on('close', () => { abort.abort(); finish(); });
+
+    res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
+    const emit = (obj) => { if (!res.writableEnded) res.write(JSON.stringify(obj) + '\n'); };
+    try {
+      await crawlSite(pageUrl, { cookie, signal: abort.signal, emit });
+    } catch (e) {
+      console.error('Scan failed:', e.message);
+      emit({ error: 'The scan stopped because of a server error.' });
+    } finally {
+      finish();
+      res.end();
+    }
+  });
 
   app.post('/api/materials/find', async (req, res) => {
     const pageUrl = String((req.body && req.body.url) || '').trim();

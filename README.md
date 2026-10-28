@@ -74,3 +74,7 @@ The second panel on the page takes a web page URL and lists the PDFs, e-books (E
 - The optional cookie is for sites you are logged into. It is used for that request only, sent only to the pasted site and its subdomains, and never stored or logged.
 - `MAX_MATERIAL_MB` (default `1500`) and `MAX_MATERIAL_MS` (default 30 minutes) limit one transfer.
 - Only fetch content you have the right to download.
+
+### Scanning a whole site
+
+With "Scan the whole site" on, `POST /api/materials/crawl` `{ url, cookie? }` crawls the site from the pasted address and streams results as lines (`application/x-ndjson`: `{items}`, `{progress}`, then `{done}`). It reads `robots.txt` (rules and `Crawl-delay`) and the sitemap, stays on the one site, identifies itself as `TheExtractorBot`, and stops at `MAX_CRAWL_PAGES` (default 60), depth 3, `MAX_CRAWL_MS` (default 75 seconds) or 500 files.
