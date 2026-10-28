@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: the-extractor-tool
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/me
+    envVars:
+      - key: BASE_URL
+        sync: false          # set to your Render URL, e.g. https://the-extractor-tool.onrender.com
+      - key: GOOGLE_CLIENT_ID
+        sync: false          # optional: enables Google Drive
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false          # optional: enables Google Drive
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: MAX_CONCURRENT
+        value: "2"
+      - key: MAX_RUNTIME_MS
+        value: "900000"
