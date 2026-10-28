@@ -76,23 +76,9 @@ function oauthClient() {
   return new google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, `${BASE_URL}/auth/google/callback`);
 }
 
-// Ask yt-dlp for the title only (no download). Runs in parallel with the extraction.
-function getTitle(url) {
-  return new Promise((resolve) => {
-    const p = spawn(YTDLP, ['--no-playlist', '--no-warnings', '--skip-download', '--print', '%(title)s', url]);
-    let out = '';
-    const timer = setTimeout(() => p.kill('SIGKILL'), 60 * 1000);
-    p.stdout.on('data', (d) => { out += d; });
-    p.on('error', () => { clearTimeout(timer); resolve(null); });
-    p.on('close', (code) => {
-      clearTimeout(timer);
-      resolve(code === 0 ? out.trim().split('\n')[0] || null : null);
-    });
-  });
-}
-
-// Ask yt-dlp for the direct URL of the best audio stream. ffmpeg reads that URL itself,
-// which avoids piping containers that cannot be streamed (such as m4a with its index at the end).
+// Ask yt-dlp (one call) for the title and the direct URL of the best audio stream. ffmpeg reads
+// that URL itself, which avoids piping containers that cannot be streamed (such as m4a with its
+// index at the end).
 function getDirectUrl(url) {
   return new Promise((resolve) => {
     const p = spawn(YTDLP, ['--no-playlist', '--no-warnings', '--impersonate', 'chrome', '-f', 'bestaudio/best', '-j', url]);
@@ -112,7 +98,13 @@ function getDirectUrl(url) {
         const info = JSON.parse(out);
         const fmt = (info.requested_formats && info.requested_formats[0]) || info;
         if (!fmt.url) throw new Error('no url');
-        resolve({ ok: true, url: fmt.url, headers: fmt.http_headers || {} });
+        resolve({
+          ok: true,
+          url: fmt.url,
+          headers: fmt.http_headers || {},
+          title: info.title || null,
+          isMp3: fmt.acodec === 'mp3' || fmt.ext === 'mp3'
+        });
       } catch (_) {
         resolve({ ok: false, error: 'Could not read the audio stream for this link.' });
       }
@@ -213,8 +205,8 @@ app.get('/api/extract', async (req, res) => {
   }
 
   try {
-    const [direct, title] = await Promise.all([getDirectUrl(url), getTitle(url)]);
-    titleName = sanitizeFilename(title || 'audio');
+    const direct = await getDirectUrl(url);
+    titleName = sanitizeFilename(direct.title || 'audio');
     haveTitle = true;
 
     if (!direct.ok) {
@@ -232,7 +224,8 @@ app.get('/api/extract', async (req, res) => {
       '-hide_banner', '-loglevel', 'error',
       ...headerArgs,
       '-i', direct.url, '-vn',
-      '-codec:a', 'libmp3lame', '-q:a', '4',
+      // Already MP3: copy the stream as is. Anything else is encoded.
+      ...(direct.isMp3 ? ['-codec:a', 'copy'] : ['-codec:a', 'libmp3lame', '-q:a', '4']),
       '-f', 'mp3', 'pipe:1'
     ]);
 
