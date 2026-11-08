@@ -94,6 +94,7 @@ It spends your OpenAI credit, so it stays off until both of these are set, and e
 | `OPENAI_IMAGE_QUALITY` | Optional image quality (for example `low` with `gpt-image-1`) | unset |
 | `STORYBOARD_TEXT_PER_HOUR` | Storyboards per visitor per hour | `12` |
 | `STORYBOARD_IMAGES_PER_HOUR` | Images per visitor per hour | `40` |
-| `OPENAI_BASE_URL` | API address (tests only) | `https://api.openai.com/v1` |
+| `OPENAI_BASE_URL` | API address. Use a free OpenAI-compatible provider, e.g. Groq `https://api.groq.com/openai/v1` or Gemini `https://generativelanguage.googleapis.com/v1beta/openai` | `https://api.openai.com/v1` |
+| `STORYBOARD_IMAGES` | `off` hides image drawing and shows copy-prompt buttons. Defaults to off when `OPENAI_BASE_URL` is not OpenAI | on for OpenAI |
 
 Endpoints: `GET /api/storyboard/status`, `POST /api/storyboard/generate`, `POST /api/storyboard/image` (both send the `X-Access-Code` header), and `POST /api/storyboard/drive/folder` and `/drive/file` for the Drive export. Images are returned to the browser and never stored on the server.

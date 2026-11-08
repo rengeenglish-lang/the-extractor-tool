@@ -309,6 +309,7 @@
     </div>
     <div class="sb-tools hidden" id="sbTools">
       <button type="button" class="primary" id="sbAllImages">Generate all images</button>
+      <button type="button" class="ghost hidden" id="sbPrompts">Copy all image prompts</button>
       <button type="button" class="ghost" id="sbCopy">Copy text</button>
       <button type="button" class="ghost" id="sbDownload">Download Markdown</button>
       <button type="button" class="ghost" id="sbDrive">Save to Drive</button>
@@ -777,7 +778,7 @@
 
   // ---------- Content storyboard creator ----------
   const sbSay = statusLine($('#sbStatus'));
-  const sb = { board: null, busy: false, cards: new Map() };
+  const sb = { board: null, busy: false, cards: new Map(), images: true };
 
   function sbHeaders() {
     return { 'Content-Type': 'application/json', 'X-Access-Code': $('#sbCode').value.trim() };
@@ -802,6 +803,9 @@
         o.textContent = `${p.label} (${p.aspect})`;
         sel.append(o);
       }
+      sb.images = s.images !== false;
+      $('#sbAllImages').classList.toggle('hidden', !sb.images);
+      $('#sbPrompts').classList.toggle('hidden', sb.images);
       $('#sbSetup').classList.toggle('hidden', s.configured);
       $('#sbMissing').textContent = s.missing.join(' and ');
       $('#sbForm').querySelectorAll('input, select, textarea, button').forEach((el) => { el.disabled = !s.configured; });
@@ -879,6 +883,19 @@
 
     const actions = document.createElement('div');
     actions.className = 'scene-actions';
+    if (!sb.images) {
+      const cp = document.createElement('button');
+      cp.type = 'button';
+      cp.className = 'primary';
+      cp.textContent = 'Copy prompt';
+      cp.addEventListener('click', async () => {
+        try { await navigator.clipboard.writeText(s.imagePrompt); sbSay(`Prompt for scene ${s.n} copied.`, 'ok'); }
+        catch (_) { sbSay('Your browser blocked copying. Select the prompt text and copy it.', 'err'); }
+      });
+      actions.append(cp);
+      el.append(actions);
+      return el;
+    }
     const gen = document.createElement('button');
     gen.type = 'button';
     gen.className = 'primary';
@@ -988,6 +1005,12 @@
   function boardFileName() {
     return sb.board.title.replace(/[\\/:*?"<>|\x00-\x1f]+/g, '_').replace(/\s+/g, ' ').trim().slice(0, 80) || 'storyboard';
   }
+
+  $('#sbPrompts').addEventListener('click', async () => {
+    const text = sb.board.scenes.map((s) => `Scene ${s.n}: ${s.imagePrompt}`).join('\n\n');
+    try { await navigator.clipboard.writeText(text); sbSay('All image prompts copied.', 'ok'); }
+    catch (_) { sbSay('Your browser blocked copying. Use Download Markdown instead.', 'err'); }
+  });
 
   $('#sbCopy').addEventListener('click', async () => {
     try {

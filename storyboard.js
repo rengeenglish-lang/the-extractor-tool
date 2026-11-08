@@ -13,6 +13,11 @@ const { google } = require('googleapis');
 
 const OPENAI_BASE = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
 const TEXT_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+// Images use OpenAI's image API. They switch off by default when the text model comes from another
+// provider (Groq, Gemini...), or explicitly with STORYBOARD_IMAGES=off (or on).
+const IMAGES_ENABLED = process.env.STORYBOARD_IMAGES
+  ? !/^(off|0|false|no)$/i.test(process.env.STORYBOARD_IMAGES)
+  : /^https:\/\/api\.openai\.com\//i.test(OPENAI_BASE);
 const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || 'dall-e-3';
 const IMAGE_QUALITY = process.env.OPENAI_IMAGE_QUALITY || '';          // optional, e.g. "low" for gpt-image-1
 const MAX_TEXT_PER_HOUR = Number(process.env.STORYBOARD_TEXT_PER_HOUR || 12);
@@ -122,7 +127,8 @@ function register(app, deps) {
       missing: [!process.env.OPENAI_API_KEY && 'OPENAI_API_KEY', !process.env.STORYBOARD_ACCESS_CODE && 'STORYBOARD_ACCESS_CODE'].filter(Boolean),
       platforms: Object.fromEntries(Object.entries(PLATFORMS).map(([k, v]) => [k, { label: v.label, aspect: v.aspect }])),
       textModel: TEXT_MODEL,
-      imageModel: IMAGE_MODEL
+      imageModel: IMAGE_MODEL,
+      images: IMAGES_ENABLED
     });
   });
 
@@ -170,6 +176,7 @@ function register(app, deps) {
   });
 
   app.post('/api/storyboard/image', guard, async (req, res) => {
+    if (!IMAGES_ENABLED) return res.status(404).json({ error: 'Image drawing is switched off on this server. Copy the prompts into a free image tool instead.' });
     const b = req.body || {};
     const prompt = cap(b.prompt, 1000);
     if (prompt.length < 5) return res.status(400).json({ error: 'The scene has no image prompt.' });
