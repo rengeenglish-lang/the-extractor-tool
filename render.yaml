@@ -11,6 +11,10 @@ services:
         sync: false          # optional: enables Google Drive
       - key: GOOGLE_CLIENT_SECRET
         sync: false          # optional: enables Google Drive
+      - key: OPENAI_API_KEY
+        sync: false          # optional: enables the storyboard tool (set it in the Render dashboard)
+      - key: STORYBOARD_ACCESS_CODE
+        sync: false          # optional: code visitors must enter to use the storyboard tool
       - key: SESSION_SECRET
         generateValue: true
       - key: MAX_CONCURRENT

@@ -60,12 +60,42 @@
   .scan-opt small { flex-basis: 100%; margin-left: 25px; }
   .results-card { min-height: 360px; }
   .results-card .items { max-height: calc(100vh - 330px); min-height: 80px; overflow-y: auto; padding-right: 4px; }
+  .search-card.tall { position: static; }
+  .field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+  .field input, .field select, .field textarea { padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--soft); color: var(--text); font: 15px/1.4 inherit; font-family: inherit; width: 100%; min-width: 0; }
+  .field textarea { resize: vertical; }
+  .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .notice { margin: 0 0 14px; padding: 10px 12px; border-radius: 10px; font-size: 13px; background: var(--danger-soft); color: var(--danger); }
+  .sb-head { margin-top: 14px; }
+  .sb-head h3 { margin: 0; font-size: 18px; }
+  .sb-head p { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
+  .sb-head .meta-line { font-size: 12px; }
+  .sb-tools { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .sb-tools button { padding: 8px 14px; font-size: 13px; }
+  .drive-link { display: inline-block; margin-top: 10px; font-size: 13px; color: var(--accent); }
+  .scenes { margin-top: 14px; display: grid; gap: 14px; }
+  .results-card .scenes { max-height: calc(100vh - 330px); overflow-y: auto; padding-right: 4px; }
+  .scene { border: 1px solid var(--border); border-radius: 14px; padding: 14px; background: var(--soft); }
+  .scene-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .scene-head h3 { margin: 0; font-size: 15px; flex: 1; min-width: 0; }
+  .scene .num, .scene .dur { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 3px 8px; border-radius: 7px; }
+  .scene .num { color: var(--on-accent); background: var(--accent); }
+  .scene .dur { color: var(--muted); border: 1px solid var(--border); }
+  .scene dl { margin: 10px 0 0; display: grid; gap: 6px; font-size: 14px; }
+  .scene dt { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  .scene dd { margin: 0; overflow-wrap: anywhere; }
+  .shot { margin-top: 12px; border-radius: 10px; border: 1px dashed var(--border); background: var(--panel); display: grid; place-items: center; overflow: hidden; color: var(--muted); font-size: 13px; max-height: 360px; }
+  .shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .scene textarea { width: 100%; margin-top: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text); font: 13px/1.4 inherit; font-family: inherit; resize: vertical; }
+  .scene-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .scene-actions button { padding: 7px 12px; font-size: 13px; }
   .placeholder { margin: 40px 8px; text-align: center; color: var(--muted); font-size: 14px; }
   .results-card:has(.status:not([hidden])) .placeholder, .results-card:has(.items li) .placeholder { display: none; }
   @media (max-width: 860px) {
     .files-grid { grid-template-columns: minmax(0, 1fr); }
     .search-card { position: static; }
-    .results-card .items { max-height: none; }
+    .results-card .items, .results-card .scenes { max-height: none; }
   }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .hidden { display: none !important; }
@@ -92,7 +122,7 @@
   .drive-pill .note { color: var(--muted); }
 
   /* Tabs */
-  .tabs { display: flex; gap: 4px; padding: 4px; max-width: 440px; margin-left: auto; margin-right: auto; background: color-mix(in srgb, var(--accent) 10%, var(--border)); border-radius: 14px; margin-bottom: 14px; }
+  .tabs { display: flex; gap: 4px; padding: 4px; max-width: 580px; margin-left: auto; margin-right: auto; background: color-mix(in srgb, var(--accent) 10%, var(--border)); border-radius: 14px; margin-bottom: 14px; }
   .tab { flex: 1; border: 0; background: transparent; color: var(--muted); padding: 11px 12px; border-radius: 10px; font: inherit; font-weight: 600; cursor: pointer; transition: background .15s, color .15s; }
   .tab:hover { color: var(--text); }
   .tab[aria-selected="true"] { background: var(--panel); color: var(--accent); box-shadow: 0 1px 3px rgba(0, 0, 0, .14); }
@@ -197,6 +227,7 @@
   <div class="tabs" role="tablist" aria-label="Tools">
     <button class="tab" role="tab" id="tabAudio" aria-controls="paneAudio" aria-selected="true">Link to MP3</button>
     <button class="tab" role="tab" id="tabFiles" aria-controls="paneFiles" aria-selected="false">Find files</button>
+    <button class="tab" role="tab" id="tabBoard" aria-controls="paneBoard" aria-selected="false">Storyboard</button>
   </div>
 
   <section class="panel" id="paneAudio" role="tabpanel" aria-labelledby="tabAudio">
@@ -241,6 +272,53 @@
    </div>
   </section>
 
+  <section class="files-grid hidden" id="paneBoard" role="tabpanel" aria-labelledby="tabBoard">
+   <div class="panel search-card tall">
+    <h2>Content storyboard creator</h2>
+    <p class="lede">Give a topic and ChatGPT writes a scene-by-scene storyboard. Then draw an image for each scene.</p>
+    <div class="notice hidden" id="sbSetup">Not set up yet. The site owner needs to add <b id="sbMissing"></b> in the Render settings.</div>
+    <form id="sbForm" autocomplete="off">
+      <label class="field">Access code <input type="password" id="sbCode" autocomplete="off" placeholder="Ask the site owner"></label>
+      <label class="field">Topic or idea <textarea id="sbTopic" rows="3" required placeholder="e.g. 5 phrasal verbs that make your IELTS speaking sound natural"></textarea></label>
+      <label class="field">Format <select id="sbPlatform"></select></label>
+      <div class="row2">
+        <label class="field">Scenes <input type="number" id="sbScenes" min="3" max="12" value="6"></label>
+        <label class="field">Language <input type="text" id="sbLanguage" value="English"></label>
+      </div>
+      <label class="field">Audience <input type="text" id="sbAudience" placeholder="e.g. B1 learners preparing for IELTS"></label>
+      <label class="field">Tone <input type="text" id="sbTone" placeholder="friendly and clear"></label>
+      <label class="field">Image style <input type="text" id="sbStyle" list="sbStyles" value="clean flat illustration, soft colors"></label>
+      <datalist id="sbStyles">
+        <option value="clean flat illustration, soft colors"></option>
+        <option value="watercolor illustration"></option>
+        <option value="cinematic photo, natural light"></option>
+        <option value="whiteboard sketch, black marker on white"></option>
+        <option value="3D cartoon, bright and playful"></option>
+        <option value="comic book panel, bold outlines"></option>
+      </datalist>
+      <button type="submit" class="primary" id="sbGo">Create storyboard</button>
+    </form>
+   </div>
+   <div class="panel results-card">
+    <h2>Storyboard</h2>
+    <div class="status" id="sbStatus" role="status" aria-live="polite" hidden><span class="spin"></span><span class="msg"></span></div>
+    <div class="sb-head hidden" id="sbHead">
+      <h3 id="sbTitle"></h3>
+      <p id="sbLogline"></p>
+      <p class="meta-line" id="sbMeta"></p>
+    </div>
+    <div class="sb-tools hidden" id="sbTools">
+      <button type="button" class="primary" id="sbAllImages">Generate all images</button>
+      <button type="button" class="ghost" id="sbCopy">Copy text</button>
+      <button type="button" class="ghost" id="sbDownload">Download Markdown</button>
+      <button type="button" class="ghost" id="sbDrive">Save to Drive</button>
+    </div>
+    <a class="drive-link hidden" id="sbDriveLink" target="_blank" rel="noopener">Open the Drive folder</a>
+    <div class="scenes" id="sbBoard"></div>
+    <p class="placeholder">Your storyboard will appear here.</p>
+   </div>
+  </section>
+
   <footer>Only process content you have the right to use.</footer>
 </div>
 
@@ -281,16 +359,18 @@
   }
 
   // ---------- Tabs ----------
+  const TABS = ['audio', 'files', 'board'];
+  const TAB_IDS = { audio: ['#tabAudio', '#paneAudio'], files: ['#tabFiles', '#paneFiles'], board: ['#tabBoard', '#paneBoard'] };
   function showTab(name) {
-    const audio = name !== 'files';
-    $('#tabAudio').setAttribute('aria-selected', String(audio));
-    $('#tabFiles').setAttribute('aria-selected', String(!audio));
-    $('#paneAudio').classList.toggle('hidden', !audio);
-    $('#paneFiles').classList.toggle('hidden', audio);
-    try { localStorage.setItem('tab', audio ? 'audio' : 'files'); } catch (_) {}
+    if (!TABS.includes(name)) name = 'audio';
+    for (const t of TABS) {
+      const [tab, pane] = TAB_IDS[t];
+      $(tab).setAttribute('aria-selected', String(t === name));
+      $(pane).classList.toggle('hidden', t !== name);
+    }
+    try { localStorage.setItem('tab', name); } catch (_) {}
   }
-  $('#tabAudio').addEventListener('click', () => showTab('audio'));
-  $('#tabFiles').addEventListener('click', () => showTab('files'));
+  for (const t of TABS) $(TAB_IDS[t][0]).addEventListener('click', () => showTab(t));
   try { showTab(localStorage.getItem('tab') || 'audio'); } catch (_) {}
 
   // ---------- Color themes ----------
@@ -695,6 +775,255 @@
     }
   }
 
+  // ---------- Content storyboard creator ----------
+  const sbSay = statusLine($('#sbStatus'));
+  const sb = { board: null, busy: false, cards: new Map() };
+
+  function sbHeaders() {
+    return { 'Content-Type': 'application/json', 'X-Access-Code': $('#sbCode').value.trim() };
+  }
+  try { $('#sbCode').value = sessionStorage.getItem('sbcode') || ''; } catch (_) {}
+  $('#sbCode').addEventListener('input', () => { try { sessionStorage.setItem('sbcode', $('#sbCode').value); } catch (_) {} });
+
+  function setSbBusy(on) {
+    sb.busy = on;
+    $('#sbGo').disabled = on;
+    document.querySelectorAll('#sbTools button, #sbBoard .scene-actions button').forEach((b) => { b.disabled = on; });
+  }
+
+  async function loadSbStatus() {
+    try {
+      const s = await (await fetch('/api/storyboard/status')).json();
+      const sel = $('#sbPlatform');
+      sel.textContent = '';
+      for (const [id, p] of Object.entries(s.platforms)) {
+        const o = document.createElement('option');
+        o.value = id;
+        o.textContent = `${p.label} (${p.aspect})`;
+        sel.append(o);
+      }
+      $('#sbSetup').classList.toggle('hidden', s.configured);
+      $('#sbMissing').textContent = s.missing.join(' and ');
+      $('#sbForm').querySelectorAll('input, select, textarea, button').forEach((el) => { el.disabled = !s.configured; });
+    } catch (_) {}
+  }
+
+  function sceneTotal(b) { return b.scenes.reduce((n, s) => n + s.duration, 0); }
+
+  function renderBoard() {
+    const b = sb.board;
+    const box = $('#sbBoard');
+    box.textContent = '';
+    sb.cards.clear();
+    $('#sbHead').classList.toggle('hidden', !b);
+    $('#sbTools').classList.toggle('hidden', !b);
+    $('#sbDriveLink').classList.add('hidden');
+    if (!b) return;
+    $('#sbTitle').textContent = b.title;
+    $('#sbLogline').textContent = b.logline;
+    $('#sbMeta').textContent = `${b.scenes.length} scenes · about ${sceneTotal(b)} seconds · ${b.aspect} · ${b.style}`;
+    for (const s of b.scenes) {
+      const card = sceneCard(s);
+      sb.cards.set(s.n, card);
+      box.append(card);
+    }
+  }
+
+  function sceneCard(s) {
+    const el = document.createElement('article');
+    el.className = 'scene';
+
+    const head = document.createElement('div');
+    head.className = 'scene-head';
+    const num = document.createElement('span');
+    num.className = 'num';
+    num.textContent = `Scene ${s.n}`;
+    const title = document.createElement('h3');
+    title.textContent = s.title;
+    const dur = document.createElement('span');
+    dur.className = 'dur';
+    dur.textContent = `${s.duration}s`;
+    head.append(num, title, dur);
+    el.append(head);
+
+    const dl = document.createElement('dl');
+    for (const [label, text] of [['Narration', s.narration], ['On screen', s.visual], ['On-screen text', s.onScreenText]]) {
+      if (!text) continue;
+      const dt = document.createElement('dt');
+      dt.textContent = label;
+      const dd = document.createElement('dd');
+      dd.textContent = text;
+      dl.append(dt, dd);
+    }
+    el.append(dl);
+
+    const shot = document.createElement('div');
+    shot.className = 'shot';
+    shot.style.aspectRatio = sb.board.aspect.replace(':', ' / ');
+    if (s.image) {
+      const img = document.createElement('img');
+      img.src = s.image;
+      img.alt = `Scene ${s.n}: ${s.title}`;
+      shot.append(img);
+    } else {
+      shot.textContent = 'No image yet';
+    }
+    el.append(shot);
+
+    const prompt = document.createElement('textarea');
+    prompt.rows = 2;
+    prompt.value = s.imagePrompt;
+    prompt.setAttribute('aria-label', `Image prompt for scene ${s.n}`);
+    prompt.addEventListener('input', () => { s.imagePrompt = prompt.value; });
+    el.append(prompt);
+
+    const actions = document.createElement('div');
+    actions.className = 'scene-actions';
+    const gen = document.createElement('button');
+    gen.type = 'button';
+    gen.className = 'primary';
+    gen.textContent = s.image ? 'Redraw image' : 'Generate image';
+    gen.disabled = sb.busy;
+    gen.addEventListener('click', () => runBusy(async () => { await drawScene(s); }));
+    actions.append(gen);
+    if (s.image) {
+      const dl2 = document.createElement('button');
+      dl2.type = 'button';
+      dl2.className = 'ghost';
+      dl2.textContent = 'Download image';
+      dl2.addEventListener('click', async () => saveBlob(await (await fetch(s.image)).blob(), sceneFile(s)));
+      actions.append(dl2);
+    }
+    el.append(actions);
+    return el;
+  }
+
+  function sceneFile(s) { return `scene-${String(s.n).padStart(2, '0')}.png`; }
+
+  function refreshCard(s) {
+    const old = sb.cards.get(s.n);
+    const card = sceneCard(s);
+    if (old) old.replaceWith(card);
+    sb.cards.set(s.n, card);
+  }
+
+  // Runs a task with the buttons locked; errors become a status line.
+  async function runBusy(task) {
+    if (sb.busy) return;
+    setSbBusy(true);
+    try { await task(); } catch (e) { sbSay(e.message || 'Something went wrong.', 'err'); } finally { setSbBusy(false); }
+  }
+
+  async function sbPost(path, body) {
+    const res = await fetch(path, { method: 'POST', headers: sbHeaders(), body: JSON.stringify(body) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (res.status === 401) $('#sbCode').focus();
+      throw new Error(data.error || 'The request failed.');
+    }
+    return data;
+  }
+
+  async function drawScene(s) {
+    sbSay(`Drawing the image for scene ${s.n}…`);
+    const data = await sbPost('/api/storyboard/image', { prompt: s.imagePrompt, aspect: sb.board.aspect });
+    s.image = data.image;
+    refreshCard(s);
+    sbSay(`Scene ${s.n} image ready.`, 'ok');
+  }
+
+  $('#sbForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    runBusy(async () => {
+      if (!$('#sbCode').value.trim()) { $('#sbCode').focus(); throw new Error('Enter the access code first.'); }
+      sbSay('Writing the storyboard with ChatGPT… this takes 10 to 30 seconds.');
+      const data = await sbPost('/api/storyboard/generate', {
+        topic: $('#sbTopic').value,
+        platform: $('#sbPlatform').value,
+        scenes: Number($('#sbScenes').value),
+        language: $('#sbLanguage').value,
+        audience: $('#sbAudience').value,
+        tone: $('#sbTone').value,
+        style: $('#sbStyle').value
+      });
+      sb.board = data;
+      renderBoard();
+      sbSay(`${data.scenes.length} scenes ready. Edit any image prompt, then generate the images.`, 'ok');
+    });
+  });
+
+  $('#sbAllImages').addEventListener('click', () => {
+    const todo = sb.board.scenes.filter((s) => !s.image);
+    const list = todo.length ? todo : sb.board.scenes;
+    if (!confirm(`Generate ${list.length} image${list.length === 1 ? '' : 's'}? Each one uses OpenAI credit.`)) return;
+    runBusy(async () => {
+      let done = 0;
+      const queue = [...list];
+      const worker = async () => {
+        while (queue.length) {
+          const s = queue.shift();
+          sbSay(`Drawing images… ${done} of ${list.length} done`);
+          await drawScene(s);
+          done++;
+        }
+      };
+      await Promise.all([worker(), worker()]);
+      sbSay(`All ${list.length} images are ready.`, 'ok');
+    });
+  });
+
+  function toMarkdown() {
+    const b = sb.board;
+    const lines = [`# ${b.title}`, '', `> ${b.logline}`, '', `${b.scenes.length} scenes · about ${sceneTotal(b)} seconds · ${b.aspect} · style: ${b.style}`, ''];
+    for (const s of b.scenes) {
+      lines.push(`## Scene ${s.n}: ${s.title} (${s.duration}s)`, '');
+      lines.push(`**Narration:** ${s.narration}`, '', `**On screen:** ${s.visual}`, '');
+      if (s.onScreenText) lines.push(`**On-screen text:** ${s.onScreenText}`, '');
+      lines.push(`**Image prompt:** ${s.imagePrompt}`, '');
+      if (s.image) lines.push(`![Scene ${s.n}](${sceneFile(s)})`, '');
+    }
+    return lines.join('\n');
+  }
+
+  function boardFileName() {
+    return sb.board.title.replace(/[\\/:*?"<>|\x00-\x1f]+/g, '_').replace(/\s+/g, ' ').trim().slice(0, 80) || 'storyboard';
+  }
+
+  $('#sbCopy').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(toMarkdown());
+      sbSay('Storyboard text copied.', 'ok');
+    } catch (_) {
+      sbSay('Your browser blocked copying. Use Download Markdown instead.', 'err');
+    }
+  });
+
+  $('#sbDownload').addEventListener('click', () => {
+    saveBlob(new Blob([toMarkdown()], { type: 'text/markdown' }), boardFileName() + '.md');
+    sbSay('Markdown downloaded. Images stay on this page: use Download image, or Save to Drive.', 'ok');
+  });
+
+  $('#sbDrive').addEventListener('click', () => runBusy(async () => {
+    if (!driveOn) throw new Error('Connect Google Drive first (top right).');
+    sbSay('Creating the Drive folder…');
+    const folder = await sbPost('/api/storyboard/drive/folder', { name: `Storyboard - ${boardFileName()}` });
+    const files = [{ name: 'storyboard.md', mime: 'text/markdown', blob: new Blob([toMarkdown()], { type: 'text/markdown' }) }];
+    for (const s of sb.board.scenes) {
+      if (s.image) files.push({ name: sceneFile(s), mime: 'image/png', blob: await (await fetch(s.image)).blob() });
+    }
+    for (let i = 0; i < files.length; i++) {
+      sbSay(`Saving to Drive… ${i + 1} of ${files.length}`);
+      const f = files[i];
+      const res = await fetch(`/api/storyboard/drive/file?folderId=${encodeURIComponent(folder.id)}&name=${encodeURIComponent(f.name)}&mime=${encodeURIComponent(f.mime)}`, {
+        method: 'POST', headers: { 'Content-Type': f.mime }, body: f.blob
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `Could not save ${f.name}.`);
+    }
+    if (folder.link) { const a = $('#sbDriveLink'); a.href = folder.link; a.classList.remove('hidden'); }
+    sbSay(`Saved ${files.length} file${files.length === 1 ? '' : 's'} to a new Drive folder.`, 'ok');
+  }));
+
+  loadSbStatus();
   loadMe();
 })();
 </script>

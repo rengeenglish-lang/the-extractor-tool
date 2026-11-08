@@ -415,6 +415,9 @@ app.get('/api/extract', async (req, res) => {
 // ---------- Materials: find PDFs, books and videos on a page, save the chosen one ----------
 materials.register(app, { acquire, release, oauthClient, YTDLP });
 
+// ---------- Storyboard creator (ChatGPT text and images, optional save to Drive) ----------
+require('./storyboard').register(app, { oauthClient });
+
 // ---------- Google Drive connection ----------
 app.get('/api/me', (req, res) => {
   res.json({ drive: !!req.session.drive, driveConfigured: !!GOOGLE_CLIENT_ID });

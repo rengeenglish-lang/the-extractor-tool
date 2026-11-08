@@ -78,3 +78,22 @@ The second panel on the page takes a web page URL and lists the PDFs, e-books (E
 ### Scanning a whole site
 
 With "Scan the whole site" on, `POST /api/materials/crawl` `{ url, cookie? }` crawls the site from the pasted address and streams results as lines (`application/x-ndjson`: `{items}`, `{progress}`, then `{done}`). It reads `robots.txt` (rules and `Crawl-delay`) and the sitemap, stays on the one site, identifies itself as `TheExtractorBot`, and stops at `MAX_CRAWL_PAGES` (default 60), depth 3, `MAX_CRAWL_MS` (default 75 seconds) or 500 files.
+
+## Content storyboard creator
+
+The third tab turns a topic into a scene-by-scene storyboard with ChatGPT, then draws an image per scene. The result can be copied, downloaded as Markdown, or saved to Google Drive (a new folder with `storyboard.md` and `scene-01.png`, ...).
+
+It spends your OpenAI credit, so it stays off until both of these are set, and every request needs the access code:
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `OPENAI_API_KEY` | Your OpenAI API key (set it in the Render dashboard only) | empty (tool disabled) |
+| `STORYBOARD_ACCESS_CODE` | Code visitors must enter to use the tool | empty (tool disabled) |
+| `OPENAI_MODEL` | Text model | `gpt-4o-mini` |
+| `OPENAI_IMAGE_MODEL` | Image model (`dall-e-3` or `gpt-image-1`) | `dall-e-3` |
+| `OPENAI_IMAGE_QUALITY` | Optional image quality (for example `low` with `gpt-image-1`) | unset |
+| `STORYBOARD_TEXT_PER_HOUR` | Storyboards per visitor per hour | `12` |
+| `STORYBOARD_IMAGES_PER_HOUR` | Images per visitor per hour | `40` |
+| `OPENAI_BASE_URL` | API address (tests only) | `https://api.openai.com/v1` |
+
+Endpoints: `GET /api/storyboard/status`, `POST /api/storyboard/generate`, `POST /api/storyboard/image` (both send the `X-Access-Code` header), and `POST /api/storyboard/drive/folder` and `/drive/file` for the Drive export. Images are returned to the browser and never stored on the server.
