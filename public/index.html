@@ -965,7 +965,7 @@
       });
       sb.board = data;
       renderBoard();
-      sbSay(`${data.scenes.length} scenes ready. Edit any image prompt, then generate the images.`, 'ok');
+      sbSay(`${data.scenes.length} scenes ready. ` + (sb.images ? 'Edit any image prompt, then generate the images.' : 'Copy each image prompt into a free image tool.'), 'ok');
     });
   });
 
